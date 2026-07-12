@@ -1,0 +1,83 @@
+# Podman (or Docker) compose for the self-hosted notification service.
+#
+# All images are Alpine-based to keep the footprint small.
+#
+# Podman notes:
+#   - Full image references (docker.io/...) so rootless Podman resolves them
+#     without relying on short-name aliases.
+#   - ":Z" relabels volumes for SELinux (harmless on non-SELinux hosts).
+#   - Health checks are declared here rather than as a HEALTHCHECK instruction in
+#     the Dockerfile: Podman builds OCI-format images by default and silently
+#     ignores HEALTHCHECK, which would leave the server unmonitored.
+#   - Run with: podman-compose up -d --build   (or: docker compose up -d --build)
+
+services:
+  caddy:
+    image: docker.io/library/caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro,Z
+      - caddy_data:/data:Z
+      - caddy_config:/config:Z
+    depends_on:
+      server:
+        condition: service_healthy
+
+  server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: notify-server:latest
+    restart: unless-stopped
+    env_file: .env
+    # BusyBox wget is present in the Alpine base image, so no extra package is
+    # needed for this probe.
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: notify
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: notify
+    volumes:
+      - pgdata:/var/lib/postgresql/data:Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notify"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data:Z
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pgdata:
+  redisdata:

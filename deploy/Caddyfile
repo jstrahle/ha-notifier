@@ -1,0 +1,23 @@
+# Caddy automatically obtains and renews TLS certificates from Let's Encrypt
+# for {$APP_DOMAIN}. HTTPS is mandatory for Web Push, so this is not optional.
+
+{$APP_DOMAIN} {
+	encode gzip
+
+	# API and SMS acknowledgement short-links go to the Node server.
+	handle /v1/* {
+		reverse_proxy server:3000
+	}
+	handle /a/* {
+		reverse_proxy server:3000
+	}
+	handle /healthz {
+		reverse_proxy server:3000
+	}
+
+	# Everything else is the PWA (also served by the Node server, which does
+	# SPA fallback to index.html for client-side routes).
+	handle {
+		reverse_proxy server:3000
+	}
+}

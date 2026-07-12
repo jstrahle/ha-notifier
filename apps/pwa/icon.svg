@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    App icon source.
+
+    Edit this file and run `npm run icons` to regenerate the PNGs.
+
+    Design notes:
+      - Full-bleed background, no transparency. iOS composites a transparent
+        home-screen icon onto black, which looks broken; it rounds the corners
+        itself, so we must NOT round them here.
+      - One bold shape, no fine detail. At 60x60 physical pixels on a phone,
+        anything smaller than a few percent of the canvas disappears.
+  -->
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#3730a3"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Full-bleed background. iOS applies its own corner radius. -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+
+  <!-- House roof: this is a home alerting system, so say so. -->
+  <path d="M256 104 L410 226 L378 226 L378 236 L134 236 L134 226 L102 226 Z"
+        fill="#ffffff" opacity="0.95"/>
+
+  <!-- Alert bell, sitting inside the house. -->
+  <g fill="#ffffff">
+    <path d="M256 254
+             c-38 0-69 31-69 69
+             v34
+             l-22 34
+             h182
+             l-22-34
+             v-34
+             c0-38-31-69-69-69 z"/>
+    <!-- Clapper -->
+    <path d="M232 405 h48 a24 24 0 0 1-48 0 z"/>
+    <!-- Bell top knob -->
+    <circle cx="256" cy="244" r="14"/>
+  </g>
+
+  <!-- Signal arcs: it notifies. Kept thick so they survive downscaling. -->
+  <g stroke="#a5b4fc" stroke-width="14" fill="none" stroke-linecap="round">
+    <path d="M150 300 a112 112 0 0 1 26-70"/>
+    <path d="M362 300 a112 112 0 0 0-26-70"/>
+  </g>
+</svg>
