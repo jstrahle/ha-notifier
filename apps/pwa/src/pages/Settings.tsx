@@ -141,6 +141,9 @@ export function Settings({
           You stay signed in for as long as you keep using the app — there is no
           periodic logout.
         </p>
+        <p className="text-center text-xs text-neutral-300">
+          Build {new Date(__BUILD_TIME__).toLocaleString()}
+        </p>
       </div>
     </div>
   );
