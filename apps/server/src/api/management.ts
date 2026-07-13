@@ -19,6 +19,8 @@ import {
   subscribeUserToAllTopics,
 } from '../lib/subscriptions.js';
 import { PRIORITIES } from '../lib/priority.js';
+import { toPublicActions } from '../lib/actions.js';
+import type { NotificationAction } from '../router/types.js';
 
 /**
  * Management API. Read/self-write endpoints require a logged-in user; structural
@@ -213,7 +215,15 @@ export async function registerManagementRoutes(app: FastifyInstance): Promise<vo
       .orderBy(desc(messages.createdAt))
       .limit(limit);
 
-    return reply.send(rows);
+    // Strip the action webhook URLs. They are secrets (a webhook that unlocks a
+    // door is a password), the client never uses them, and leaving them in would
+    // hand a copy to every logged-in household member.
+    return reply.send(
+      rows.map((r) => ({
+        ...r,
+        actions: toPublicActions(r.actions as NotificationAction[] | null),
+      })),
+    );
   });
 
   // ---- Users (admin) ----

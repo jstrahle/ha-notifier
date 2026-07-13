@@ -64,10 +64,17 @@ export interface Tenant {
   name: string;
 }
 
+/**
+ * An action button as the client sees it.
+ *
+ * There is deliberately no `url`. The action's webhook URL is a secret (Home
+ * Assistant: "treat a webhook ID like a password") and the server never sends it
+ * here. Pressing a button calls our own API, and the server makes the signed
+ * outbound call itself.
+ */
 export interface NotificationAction {
   id: string;
   label: string;
-  url?: string;
 }
 
 export interface ManagedUser {

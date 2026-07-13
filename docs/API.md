@@ -260,6 +260,12 @@ not per delivery.
 true once any of them has been acknowledged; `failed` flags an alert where a
 channel could not be delivered.
 
+**Actions never carry their `url`.** An action's URL is a Home Assistant webhook
+endpoint — a secret, and one that may unlock a door. Clients only ever receive
+`{ id, label }`, here and in the push payload. Pressing a button calls
+`POST /v1/actions/:messageId/:actionId`; the server looks the URL up itself and
+makes the signed outbound call. Nothing on a device ever needs to hold it.
+
 ---
 
 ## Tenant / household

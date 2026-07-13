@@ -24,7 +24,9 @@ interface PushData {
   body: string;
   priority?: string;
   tag?: string | null;
-  actions?: { id: string; label: string; url?: string }[] | null;
+  // No `url`: the server strips it. The service worker calls our own API and the
+  // server makes the outbound webhook call itself.
+  actions?: { id: string; label: string }[] | null;
   data: { messageId: string; deliveryId: string; ackToken: string | null };
 }
 

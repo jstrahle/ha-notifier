@@ -11,6 +11,7 @@ import {
 } from '../db/schema.js';
 import type { NotificationAction } from '../router/types.js';
 import { toGsm7Sms } from '../lib/gsm7.js';
+import { toPublicActions, type PublicAction } from '../lib/actions.js';
 
 /**
  * Delivery worker. Consumes the `delivery` queue and dispatches each delivery
@@ -48,10 +49,12 @@ export function startDeliveryWorker(ctx: AppContext, connection: Redis): Worker 
  * `actions` entirely; without this, an alert would arrive with no Acknowledge
  * button and escalation could only be stopped from the app.
  */
-function withAckAction(
+export function withAckAction(
   actions: NotificationAction[] | null,
-): NotificationAction[] {
-  const list = actions ? [...actions] : [];
+): PublicAction[] {
+  // Strip the webhook URLs first: they are secrets, and the device has no use
+  // for them. The server makes the outbound call itself when a button is pressed.
+  const list = toPublicActions(actions) ?? [];
   if (!list.some((a) => a.id === 'ack')) {
     list.unshift({ id: 'ack', label: 'Acknowledge' });
   }

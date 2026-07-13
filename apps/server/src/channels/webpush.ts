@@ -1,6 +1,6 @@
 import webpush from 'web-push';
 import type { AppConfig } from '../config.js';
-import type { NotificationAction } from '../router/types.js';
+import type { PublicAction } from '../lib/actions.js';
 
 /**
  * Web Push delivery. We speak the standard Web Push protocol; the browser
@@ -19,7 +19,8 @@ export interface PushPayload {
   body: string;
   priority: string;
   tag?: string | null;
-  actions?: NotificationAction[] | null;
+  /** Never carries the action's webhook URL — see lib/actions.ts. */
+  actions?: PublicAction[] | null;
   /**
    * `ackToken` lets the service worker acknowledge straight from a notification
    * button without relying on the browser session cookie, which may have
