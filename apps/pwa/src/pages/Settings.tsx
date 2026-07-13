@@ -2,11 +2,19 @@ import { useEffect, useState } from 'react';
 import { api, type Me, type Topic } from '../lib/api.js';
 import { AdminPanel } from '../components/AdminPanel.js';
 import { ApiKeys } from '../components/ApiKeys.js';
+import { MyProfile } from '../components/MyProfile.js';
+import { Devices } from '../components/Devices.js';
 
 const PRIORITIES = ['low', 'normal', 'high', 'critical'];
 const CHANNELS = ['auto', 'push_only', 'sms_only'];
 
-export function Settings({ me }: { me: Me }) {
+export function Settings({
+  me,
+  onProfileUpdated,
+}: {
+  me: Me;
+  onProfileUpdated: (me: Me) => void;
+}) {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [saving, setSaving] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -57,6 +65,12 @@ export function Settings({ me }: { me: Me }) {
         {me.sms_number ? ` · SMS ${me.sms_number}` : ''}
       </p>
 
+      {/* Own profile first: this is where a user sets the SMS number that makes
+          critical alerts able to reach them at all. */}
+      <div className="mb-8">
+        <MyProfile me={me} onUpdated={onProfileUpdated} />
+      </div>
+
       <h2 className="mb-2 text-sm font-semibold uppercase text-neutral-400">
         Topic preferences
       </h2>
@@ -79,6 +93,10 @@ export function Settings({ me }: { me: Me }) {
       </ul>
       {status && <p className="mt-3 text-sm text-neutral-500">{status}</p>}
 
+      <div className="mt-8">
+        <Devices />
+      </div>
+
       {/* Every user manages their own sender tokens — no admin needed. */}
       <div className="mt-8">
         <ApiKeys isAdmin={isAdmin} />
@@ -89,7 +107,7 @@ export function Settings({ me }: { me: Me }) {
           <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-neutral-400">
             Administration
           </p>
-          <AdminPanel onTenantRenamed={setHousehold} />
+          <AdminPanel onTenantRenamed={setHousehold} currentUserId={me.id} />
         </div>
       )}
 

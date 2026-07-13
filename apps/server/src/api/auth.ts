@@ -5,7 +5,8 @@ import { users, pushSubscriptions, subscriptions, topics } from '../db/schema.js
 import { requireUser, sessionCookieOptions } from '../lib/auth.js';
 import { verifyPassword } from '../lib/password.js';
 import { encodeSession } from '../lib/session.js';
-import { sql } from 'drizzle-orm';
+import { hashPassword } from '../lib/password.js';
+import { and, sql } from 'drizzle-orm';
 
 /**
  * Session-based auth for PWA users, plus Web Push subscription management and
@@ -99,6 +100,91 @@ export async function registerAuthAndPushRoutes(app: FastifyInstance): Promise<v
       return reply.code(404).send({ error: { code: 'not_found', message: 'User not found' } });
     }
     return reply.send(profile);
+  });
+
+  /**
+   * Edit your own profile.
+   *
+   * Previously the only way to change a phone number or password was
+   * `PATCH /v1/users/:id`, which is admin-only — so an ordinary family member
+   * could not set their own SMS number, and the seeded admin (created with no
+   * number at all) could never receive a critical SMS. That made the product's
+   * headline channel unreachable for its primary user.
+   */
+  app.patch('/v1/me', { preHandler: requireUser() }, async (req, reply) => {
+    const schema = z.object({
+      sms_number: z.string().regex(/^\+\d{6,15}$/).nullable().optional(),
+      password: z.string().min(8).optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: {
+          code: 'bad_request',
+          message: 'sms_number must be E.164 (+358401234567); password at least 8 characters',
+        },
+      });
+    }
+
+    const userId = req.userPrincipal!.userId;
+    const patch: Record<string, unknown> = {};
+    if (parsed.data.sms_number !== undefined) patch.smsNumber = parsed.data.sms_number;
+    if (parsed.data.password) {
+      patch.passwordHash = await hashPassword(parsed.data.password);
+      // Changing your password signs out your other devices.
+      patch.sessionVersion = sql`${users.sessionVersion} + 1`;
+    }
+    if (Object.keys(patch).length === 0) return reply.send({ status: 'noop' });
+
+    await app.db.update(users).set(patch).where(eq(users.id, userId));
+
+    // If the password changed, this device's cookie is now stale too — reissue
+    // it so the user is not immediately logged out of the session they are in.
+    if (parsed.data.password) {
+      const fresh = (
+        await app.db.select().from(users).where(eq(users.id, userId)).limit(1)
+      )[0]!;
+      const maxAgeSeconds = app.ctx.config.SESSION_MAX_AGE_DAYS * 24 * 60 * 60;
+      reply.setCookie(
+        'sid',
+        encodeSession(fresh.id, fresh.sessionVersion),
+        sessionCookieOptions(app.ctx.config, maxAgeSeconds),
+      );
+    }
+
+    const profile = await loadProfile(app, userId);
+    return reply.send(profile);
+  });
+
+  /** The devices this user receives push on, so they can prune old ones. */
+  app.get('/v1/push/devices', { preHandler: requireUser() }, async (req, reply) => {
+    const rows = await app.db
+      .select({
+        id: pushSubscriptions.id,
+        platform: pushSubscriptions.platform,
+        createdAt: pushSubscriptions.createdAt,
+        lastSeenAt: pushSubscriptions.lastSeenAt,
+      })
+      .from(pushSubscriptions)
+      .where(eq(pushSubscriptions.userId, req.userPrincipal!.userId));
+    return reply.send(rows);
+  });
+
+  app.delete('/v1/push/devices/:id', { preHandler: requireUser() }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const deleted = await app.db
+      .delete(pushSubscriptions)
+      .where(
+        and(
+          eq(pushSubscriptions.id, id),
+          eq(pushSubscriptions.userId, req.userPrincipal!.userId),
+        ),
+      )
+      .returning({ id: pushSubscriptions.id });
+    if (deleted.length === 0) {
+      return reply.code(404).send({ error: { code: 'not_found', message: 'Device not found' } });
+    }
+    return reply.send({ status: 'removed' });
   });
 
   app.get('/v1/push/vapid-public-key', async (_req, reply) => {

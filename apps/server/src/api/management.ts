@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
@@ -66,7 +66,13 @@ export async function registerManagementRoutes(app: FastifyInstance): Promise<vo
   app.post('/v1/topics', { preHandler: requireUser(true) }, async (req, reply) => {
     const parsed = z
       .object({
-        name: z.string().min(1),
+        // Topic names are the identifier senders use, so keep them boring:
+        // lowercase letters, digits, dash and underscore.
+        name: z
+          .string()
+          .min(1)
+          .max(60)
+          .regex(/^[a-z0-9_-]+$/, 'Use lowercase letters, digits, - and _ only'),
         dedup_cooldown_seconds: z.number().int().min(0).max(86400).nullable().optional(),
       })
       .safeParse(req.body);
@@ -87,35 +93,54 @@ export async function registerManagementRoutes(app: FastifyInstance): Promise<vo
     return reply.code(201).send(row ?? { status: 'exists' });
   });
 
-  // Per-topic dedup cooldown: a chatty door sensor and a leak detector should
-  // not share one window. NULL falls back to DEDUP_COOLDOWN_SECONDS.
+  /**
+   * Per-topic dedup cooldown. NULL falls back to DEDUP_COOLDOWN_SECONDS.
+   *
+   * Renaming is deliberately NOT supported. Senders address topics by *name*:
+   * a Home Assistant automation posts to `"topic": "security"`. Rename that
+   * topic and the automation keeps posting the old name — whereupon /v1/notify
+   * silently creates a fresh topic under it that nobody is subscribed to, and
+   * the alerts vanish with no error anywhere. Deleting and recreating is
+   * explicit and visible; renaming is a trap.
+   */
   app.patch('/v1/topics/:id', { preHandler: requireUser(true) }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const parsed = z
       .object({
-        name: z.string().min(1).optional(),
         dedup_cooldown_seconds: z.number().int().min(0).max(86400).nullable().optional(),
       })
       .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: { code: 'bad_request', message: parsed.error.message } });
-
-    const patch: Record<string, unknown> = {};
-    if (parsed.data.name !== undefined) patch.name = parsed.data.name;
-    if (parsed.data.dedup_cooldown_seconds !== undefined) {
-      patch.dedupCooldownSeconds = parsed.data.dedup_cooldown_seconds;
-    }
-    if (Object.keys(patch).length === 0) return reply.send({ status: 'noop' });
+    if (parsed.data.dedup_cooldown_seconds === undefined) return reply.send({ status: 'noop' });
 
     const tenantId = req.userPrincipal!.tenantId;
     const row = (
       await app.db
         .update(topics)
-        .set(patch)
+        .set({ dedupCooldownSeconds: parsed.data.dedup_cooldown_seconds })
         .where(and(eq(topics.id, id), eq(topics.tenantId, tenantId)))
         .returning()
     )[0];
     if (!row) return reply.code(404).send({ error: { code: 'not_found', message: 'Topic not found' } });
     return reply.send(row);
+  });
+
+  /**
+   * Delete a topic. Subscriptions and escalation rules for it go with it;
+   * past alerts are kept but detached (messages.topic_id becomes NULL), because
+   * deleting a topic should not erase your alert history.
+   */
+  app.delete('/v1/topics/:id', { preHandler: requireUser(true) }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const tenantId = req.userPrincipal!.tenantId;
+    const deleted = await app.db
+      .delete(topics)
+      .where(and(eq(topics.id, id), eq(topics.tenantId, tenantId)))
+      .returning({ id: topics.id, name: topics.name });
+    if (deleted.length === 0) {
+      return reply.code(404).send({ error: { code: 'not_found', message: 'Topic not found' } });
+    }
+    return reply.send({ status: 'deleted', name: deleted[0]!.name });
   });
 
   // ---- Subscriptions (self) ----
@@ -250,6 +275,58 @@ export async function registerManagementRoutes(app: FastifyInstance): Promise<vo
     }
     await app.db.update(users).set(patch).where(eq(users.id, id));
     return reply.send({ status: 'ok' });
+  });
+
+  /**
+   * Delete a user.
+   *
+   * Two guards, both learned the hard way in systems like this: you cannot
+   * delete yourself (an accidental click should not lock you out mid-session),
+   * and you cannot delete the last admin (which would leave the household with
+   * no way to administer anything at all).
+   *
+   * Their delivery history, subscriptions, devices and API keys go with them.
+   * Escalation rules that targeted them fall back to notifying the original
+   * recipients rather than silently disappearing.
+   */
+  app.delete('/v1/users/:id', { preHandler: requireUser(true) }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const principal = req.userPrincipal!;
+
+    if (id === principal.userId) {
+      return reply.code(400).send({
+        error: { code: 'cannot_delete_self', message: 'You cannot delete your own account' },
+      });
+    }
+
+    const target = (
+      await app.db
+        .select({ id: users.id, role: users.role, name: users.name })
+        .from(users)
+        .where(and(eq(users.id, id), eq(users.tenantId, principal.tenantId)))
+        .limit(1)
+    )[0];
+    if (!target) {
+      return reply.code(404).send({ error: { code: 'not_found', message: 'User not found' } });
+    }
+
+    if (target.role === 'admin') {
+      const admins = await app.db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.tenantId, principal.tenantId), eq(users.role, 'admin')));
+      if (admins.length <= 1) {
+        return reply.code(409).send({
+          error: {
+            code: 'last_admin',
+            message: 'Cannot delete the last admin — promote someone else first',
+          },
+        });
+      }
+    }
+
+    await app.db.delete(users).where(eq(users.id, id));
+    return reply.send({ status: 'deleted', name: target.name });
   });
 
   // ---- API keys (self-service) ----
@@ -398,23 +475,31 @@ export async function registerManagementRoutes(app: FastifyInstance): Promise<vo
       delay_seconds: z.number().int().min(10).default(180),
       next_channel: z.enum(['webpush', 'sms']).nullable().optional(),
       next_user_id: z.string().uuid().nullable().optional(),
-      step_order: z.number().int().min(1).default(1),
+      // Optional: if omitted, the step is appended to the end of that topic's
+      // chain. Making a person pick a step number by hand is implementation
+      // detail leaking into the UI — and getting it wrong creates a gap or a
+      // duplicate in the chain.
+      step_order: z.number().int().min(1).optional(),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: { code: 'bad_request', message: parsed.error.message } });
     const tenantId = req.userPrincipal!.tenantId;
     const d = parsed.data;
+    const topicId = d.topic_id ?? null;
+
+    const stepOrder = d.step_order ?? (await nextStepOrder(app, tenantId, topicId));
+
     const row = (
       await app.db
         .insert(escalationRules)
         .values({
           tenantId,
-          topicId: d.topic_id ?? null,
+          topicId,
           minPriority: d.min_priority,
           delaySeconds: d.delay_seconds,
           nextChannel: d.next_channel ?? null,
           nextUserId: d.next_user_id ?? null,
-          stepOrder: d.step_order,
+          stepOrder,
         })
         .returning()
     )[0]!;
@@ -490,6 +575,40 @@ export async function registerManagementRoutes(app: FastifyInstance): Promise<vo
     }
   });
 
+  /** Edit an existing step, rather than deleting and re-adding it. */
+  app.patch('/v1/escalation-rules/:id', { preHandler: requireUser(true) }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const schema = z.object({
+      min_priority: z.enum(PRIORITIES).optional(),
+      delay_seconds: z.number().int().min(10).optional(),
+      next_channel: z.enum(['webpush', 'sms']).nullable().optional(),
+      next_user_id: z.string().uuid().nullable().optional(),
+      step_order: z.number().int().min(1).optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'bad_request', message: parsed.error.message } });
+
+    const d = parsed.data;
+    const patch: Record<string, unknown> = {};
+    if (d.min_priority !== undefined) patch.minPriority = d.min_priority;
+    if (d.delay_seconds !== undefined) patch.delaySeconds = d.delay_seconds;
+    if (d.next_channel !== undefined) patch.nextChannel = d.next_channel;
+    if (d.next_user_id !== undefined) patch.nextUserId = d.next_user_id;
+    if (d.step_order !== undefined) patch.stepOrder = d.step_order;
+    if (Object.keys(patch).length === 0) return reply.send({ status: 'noop' });
+
+    const tenantId = req.userPrincipal!.tenantId;
+    const row = (
+      await app.db
+        .update(escalationRules)
+        .set(patch)
+        .where(and(eq(escalationRules.id, id), eq(escalationRules.tenantId, tenantId)))
+        .returning()
+    )[0];
+    if (!row) return reply.code(404).send({ error: { code: 'not_found', message: 'Rule not found' } });
+    return reply.send(row);
+  });
+
   app.delete('/v1/escalation-rules/:id', { preHandler: requireUser(true) }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const tenantId = req.userPrincipal!.tenantId;
@@ -502,6 +621,27 @@ export async function registerManagementRoutes(app: FastifyInstance): Promise<vo
     }
     return reply.send({ status: 'deleted' });
   });
+}
+
+/** The next free position in a topic's escalation chain. */
+async function nextStepOrder(
+  app: FastifyInstance,
+  tenantId: string,
+  topicId: string | null,
+): Promise<number> {
+  const rows = await app.db
+    .select({ stepOrder: escalationRules.stepOrder })
+    .from(escalationRules)
+    .where(
+      and(
+        eq(escalationRules.tenantId, tenantId),
+        topicId === null
+          ? isNull(escalationRules.topicId)
+          : eq(escalationRules.topicId, topicId),
+      ),
+    );
+  const highest = rows.reduce((max, r) => Math.max(max, r.stepOrder), 0);
+  return highest + 1;
 }
 
 export { getSingleTenantId };

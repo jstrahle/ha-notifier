@@ -47,7 +47,7 @@ export function App() {
 
   return (
     <div className="min-h-screen pb-16">
-      {tab === 'inbox' ? <Inbox /> : <Settings me={me} />}
+      {tab === 'inbox' ? <Inbox /> : <Settings me={me} onProfileUpdated={setMe} />}
       <nav className="fixed inset-x-0 bottom-0 flex border-t border-neutral-200 bg-white">
         <TabButton active={tab === 'inbox'} onClick={() => setTab('inbox')}>
           Inbox

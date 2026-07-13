@@ -77,6 +77,13 @@ export interface ManagedUser {
   smsNumber: string | null;
 }
 
+export interface Device {
+  id: string;
+  platform: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+}
+
 export interface ApiKey {
   id: string;
   name: string;
@@ -176,7 +183,25 @@ export const api = {
   renameTenant: (name: string) =>
     request<Tenant>('/v1/tenant', { method: 'PATCH', body: JSON.stringify({ name }) }),
 
+  // --- My own profile (any user, no admin needed) ---
+  patchMe: (body: { sms_number?: string | null; password?: string }) =>
+    request<Me>('/v1/me', { method: 'PATCH', body: JSON.stringify(body) }),
+
+  // --- My devices ---
+  devices: () => request<Device[]>('/v1/push/devices'),
+  deleteDevice: (id: string) =>
+    request<{ status: string }>(`/v1/push/devices/${id}`, { method: 'DELETE' }),
+
   // --- Topics (admin) ---
+  // Note: no rename. Senders address topics by name, so renaming one would
+  // silently orphan every automation still posting to the old name.
+  createTopic: (name: string, dedup_cooldown_seconds?: number | null) =>
+    request<Topic>('/v1/topics', {
+      method: 'POST',
+      body: JSON.stringify({ name, dedup_cooldown_seconds: dedup_cooldown_seconds ?? null }),
+    }),
+  deleteTopic: (id: string) =>
+    request<{ status: string; name: string }>(`/v1/topics/${id}`, { method: 'DELETE' }),
   patchTopic: (id: string, body: { dedup_cooldown_seconds?: number | null }) =>
     request<Topic>(`/v1/topics/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
 
@@ -192,6 +217,8 @@ export const api = {
     id: string,
     body: { sms_number?: string | null; role?: string; password?: string },
   ) => request<{ status: string }>(`/v1/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteUser: (id: string) =>
+    request<{ status: string; name: string }>(`/v1/users/${id}`, { method: 'DELETE' }),
 
   // --- API keys (self-service) ---
   apiKeys: () => request<ApiKey[]>('/v1/api-keys'),
@@ -209,14 +236,26 @@ export const api = {
 
   // --- Escalation rules (admin) ---
   escalationRules: () => request<EscalationRule[]>('/v1/escalation-rules'),
+  // step_order is omitted on purpose: the server appends the step to the end of
+  // that topic's chain. Making a person pick a step number is implementation
+  // detail leaking into the UI.
   createEscalationRule: (body: {
     topic_id: string | null;
     min_priority: string;
     delay_seconds: number;
     next_channel: string | null;
     next_user_id: string | null;
-    step_order: number;
   }) => request<EscalationRule>('/v1/escalation-rules', { method: 'POST', body: JSON.stringify(body) }),
+  patchEscalationRule: (
+    id: string,
+    body: {
+      min_priority?: string;
+      delay_seconds?: number;
+      next_channel?: string | null;
+      next_user_id?: string | null;
+      step_order?: number;
+    },
+  ) => request<EscalationRule>(`/v1/escalation-rules/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteEscalationRule: (id: string) =>
     request<{ status: string }>(`/v1/escalation-rules/${id}`, { method: 'DELETE' }),
 };

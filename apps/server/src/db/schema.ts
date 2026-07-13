@@ -91,7 +91,11 @@ export const messages = pgTable(
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
-    topicId: uuid('topic_id').references(() => topics.id),
+    // Deleting a topic must not destroy the alert history: the messages stay,
+    // detached from the (now gone) topic.
+    topicId: uuid('topic_id').references(() => topics.id, {
+      onDelete: 'set null',
+    }),
     priority: text('priority').notNull().default('normal'),
     title: text('title').notNull(),
     body: text('body').notNull(),
@@ -117,7 +121,7 @@ export const deliveries = pgTable(
       .references(() => messages.id, { onDelete: 'cascade' }),
     userId: uuid('user_id')
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: 'cascade' }),
     channel: text('channel').notNull(), // 'webpush' | 'sms'
     status: text('status').notNull().default('queued'),
     ackToken: text('ack_token').unique(),
@@ -136,11 +140,17 @@ export const escalationRules = pgTable('escalation_rules', {
   tenantId: uuid('tenant_id')
     .notNull()
     .references(() => tenants.id),
-  topicId: uuid('topic_id').references(() => topics.id),
+  // A rule scoped to a deleted topic has no meaning; drop it with the topic.
+  // (topic_id NULL = applies to every topic, and is unaffected.)
+  topicId: uuid('topic_id').references(() => topics.id, { onDelete: 'cascade' }),
   minPriority: text('min_priority').notNull().default('critical'),
   delaySeconds: integer('delay_seconds').notNull().default(180),
   nextChannel: text('next_channel'),
-  nextUserId: uuid('next_user_id').references(() => users.id),
+  // If the escalation target is deleted, the rule falls back to re-notifying the
+  // original recipients rather than disappearing silently.
+  nextUserId: uuid('next_user_id').references(() => users.id, {
+    onDelete: 'set null',
+  }),
   stepOrder: integer('step_order').notNull().default(1),
 });
 

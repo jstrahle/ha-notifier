@@ -122,6 +122,52 @@ ALTER TABLE messages  ADD COLUMN IF NOT EXISTS duplicate_count int NOT NULL DEFA
 ALTER TABLE api_keys  ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES users(id) ON DELETE CASCADE;
 ALTER TABLE users     ADD COLUMN IF NOT EXISTS session_version int NOT NULL DEFAULT 1;
 
+-- Deletion semantics.
+--
+-- The original DDL declared these foreign keys inline with no ON DELETE action,
+-- so deleting a topic or a user that had ever been used failed outright. We
+-- rewrite them here.
+--
+-- Note the constraint names: inline REFERENCES in the original DDL got
+-- PostgreSQL's default naming (table_column_fkey), while Drizzle would name the
+-- same constraint table_column_reftable_refcol_fk. Depending on how a given
+-- installation was created it may have either, so we drop both candidates.
+-- Dropping only the wrong name would succeed silently and leave the old
+-- constraint in place -- the failure would then surface later, on a delete.
+DO $$
+BEGIN
+  -- Alert history survives its topic; the messages are simply detached.
+  ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_topic_id_fkey;
+  ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_topic_id_topics_id_fk;
+  ALTER TABLE messages
+    ADD CONSTRAINT messages_topic_id_fkey
+    FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE SET NULL;
+
+  -- An escalation rule scoped to a deleted topic is meaningless.
+  -- (topic_id NULL = "applies to every topic", and is untouched by this.)
+  ALTER TABLE escalation_rules DROP CONSTRAINT IF EXISTS escalation_rules_topic_id_fkey;
+  ALTER TABLE escalation_rules DROP CONSTRAINT IF EXISTS escalation_rules_topic_id_topics_id_fk;
+  ALTER TABLE escalation_rules
+    ADD CONSTRAINT escalation_rules_topic_id_fkey
+    FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE;
+
+  -- A removed person's delivery rows are their inbox; they mean nothing without
+  -- them.
+  ALTER TABLE deliveries DROP CONSTRAINT IF EXISTS deliveries_user_id_fkey;
+  ALTER TABLE deliveries DROP CONSTRAINT IF EXISTS deliveries_user_id_users_id_fk;
+  ALTER TABLE deliveries
+    ADD CONSTRAINT deliveries_user_id_fkey
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+  -- An escalation rule that targeted a deleted person falls back to notifying
+  -- the original recipients, rather than vanishing with them.
+  ALTER TABLE escalation_rules DROP CONSTRAINT IF EXISTS escalation_rules_next_user_id_fkey;
+  ALTER TABLE escalation_rules DROP CONSTRAINT IF EXISTS escalation_rules_next_user_id_users_id_fk;
+  ALTER TABLE escalation_rules
+    ADD CONSTRAINT escalation_rules_next_user_id_fkey
+    FOREIGN KEY (next_user_id) REFERENCES users(id) ON DELETE SET NULL;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_messages_dedup ON messages (tenant_id, dedup_key, created_at);
 CREATE INDEX IF NOT EXISTS idx_deliveries_status ON deliveries (status, channel);
 CREATE INDEX IF NOT EXISTS idx_action_events_message ON action_events (message_id);

@@ -119,6 +119,25 @@ actively used app never logs you out. The cookie is `HttpOnly`, `Secure` and
 
 `/v1/me` returns the profile plus the user's topic subscriptions.
 
+### `PATCH /v1/me`  (session)
+
+Edit **your own** profile — no admin required.
+
+```json
+{ "sms_number": "+358401234567", "password": "new-password" }
+```
+
+Both fields optional; `sms_number` may be `null` to clear it. Changing your
+password signs out your *other* devices but keeps the current one. Returns the
+updated profile.
+
+### `GET /v1/push/devices` · `DELETE /v1/push/devices/:id`  (session)
+
+The devices you receive push on, and a way to remove ones you no longer use.
+Push subscriptions accumulate across reinstalls; dead ones are pruned
+automatically, but an old-but-alive device keeps receiving your alerts until you
+remove it.
+
 ### `POST /v1/auth/logout-all`  (session)
 
 Revokes **every** session the user holds, on every device — for a lost phone.
@@ -154,7 +173,20 @@ existing topic, and a newly created topic (including one auto-created by
 (`min_priority=normal`, `channel_pref=auto`, no quiet hours). Users then narrow
 this in Settings. Existing preferences are never overwritten.
 
-### `GET /v1/topics`  (session)  ·  `POST /v1/topics`  (admin)
+### `GET /v1/topics` (session) · `POST /v1/topics` (admin) · `PATCH /v1/topics/:id` (admin) · `DELETE /v1/topics/:id` (admin)
+
+`POST` takes `{ name, dedup_cooldown_seconds? }`. Names are restricted to
+lowercase letters, digits, `-` and `_`, because senders address topics by name.
+
+`PATCH` only changes `dedup_cooldown_seconds`. **Renaming is deliberately not
+supported:** an automation posts to a *name*, so renaming a topic would leave it
+posting the old one — which `/v1/notify` would silently recreate as a fresh topic
+that nobody is subscribed to, and the alerts would disappear with no error
+anywhere.
+
+`DELETE` removes the topic's subscriptions and escalation rules. Past alerts are
+**kept**, detached from the deleted topic — deleting a topic should not erase
+your alert history.
 
 ### `PUT /v1/subscriptions`  (session)
 
@@ -215,6 +247,13 @@ channel could not be delivered.
 - `POST /v1/users` — `{ name, password, sms_number?, role? }`. New users are
   auto-subscribed to every topic.
 - `PATCH /v1/users/:id` — `{ sms_number?, role?, password? }`
+- `DELETE /v1/users/:id` — their alert history, devices, subscriptions and API
+  keys go with them. Two guards: you cannot delete **yourself** (`400`), and you
+  cannot delete the **last admin** (`409`). An escalation rule that targeted the
+  deleted user survives, falling back to notifying the original recipients.
+
+For a user editing their *own* number or password, see `PATCH /v1/me` — that
+needs no admin.
 
 ## API keys (self-service)
 
@@ -235,7 +274,9 @@ tenant, including the ownerless one created by the seed.
 ## Escalation rules (admin)
 
 - `GET /v1/escalation-rules`
-- `POST /v1/escalation-rules`
+- `POST /v1/escalation-rules` — `step_order` is **optional**; omit it and the
+  step is appended to the end of that topic's chain.
+- `PATCH /v1/escalation-rules/:id` — edit a step in place
 - `DELETE /v1/escalation-rules/:id`
 
 ```json
