@@ -484,57 +484,45 @@ to Mum.* Any acknowledgement, from anyone, cancels the whole chain.
 
 ## 13. Connect Home Assistant (optional)
 
-The easiest route: in the app, go to **Settings → Home Assistant → Generate
-configuration**. It creates a new API key and prints the complete YAML with your
-domain and key already filled in — copy it straight into Home Assistant.
-
-You end up with a real `notify.home_alert` action, exactly like
-`notify.pushover`, using Home Assistant's **built-in** RESTful notification
-platform. No custom component required.
-
-`secrets.yaml` (the `Bearer ` prefix is part of the value — omit it and you get a
-401 with no obvious cause):
+See [`docs/HOME_ASSISTANT.md`](docs/HOME_ASSISTANT.md) for the full setup. The
+short version — in `configuration.yaml`:
 
 ```yaml
-home_alert_token: "Bearer PASTE_YOUR_API_KEY"
+rest_command:
+  home_notify:
+    url: "https://notify.example.com/v1/notify"
+    method: POST
+    headers:
+      Authorization: !secret notify_api_key_header
+      Content-Type: "application/json"
+    payload: >
+      {
+        "topic": "{{ topic | default('general') }}",
+        "priority": "{{ priority | default('normal') }}",
+        "title": "{{ title }}",
+        "body": "{{ message }}"
+      }
 ```
 
-`configuration.yaml`:
+`secrets.yaml` (note the `Bearer ` prefix is part of the value):
 
 ```yaml
-notify:
-  - name: home_alert
-    platform: rest
-    resource: https://notify.example.com/v1/homeassistant/notify
-    method: POST_JSON
-    headers:
-      Authorization: !secret home_alert_token
-    data:
-      priority: normal
-
-  - name: home_alert_critical
-    platform: rest
-    resource: https://notify.example.com/v1/homeassistant/notify
-    method: POST_JSON
-    headers:
-      Authorization: !secret home_alert_token
-    data:
-      priority: critical
+notify_api_key_header: "Bearer PASTE_YOUR_API_KEY"
 ```
 
-Restart Home Assistant, then use it in an automation:
+Use it in an automation:
 
 ```yaml
-actions:
-  - action: notify.home_alert_critical
+action:
+  - service: rest_command.home_notify
     data:
+      topic: "security"
+      priority: "critical"
       title: "Water leak in kitchen"
       message: "The kitchen leak sensor triggered"
-      target: "security"      # the topic
 ```
 
-Full details, including action buttons and deduplication:
-[`docs/HOME_ASSISTANT.md`](docs/HOME_ASSISTANT.md).
+---
 
 ## 14. MQTT bridge (optional)
 
@@ -603,7 +591,36 @@ The seed step is **idempotent and additive** — it never drops or overwrites yo
 data, so it is safe to run on every upgrade. Run it every time; some releases add
 database columns and the app will not work correctly without them.
 
----
+### If the release changed `Caddyfile` or `.env`
+
+`up -d --build` rebuilds the *app image*, but it does not restart a container
+whose image is unchanged — and both `Caddyfile` and `.env` are read into the
+container from outside it. So the file on disk updates while the running process
+happily carries on with the old configuration in memory, and your change appears
+to do nothing.
+
+Restart the affected container explicitly:
+
+```bash
+$COMPOSE restart caddy    # after editing Caddyfile
+$COMPOSE up -d server     # after editing .env
+```
+
+If in doubt, the blunt instrument always works and takes a few seconds:
+
+```bash
+$COMPOSE down
+$COMPOSE up -d
+```
+
+(`down` without `-v` keeps your database. Only `down -v` deletes data.)
+
+### After upgrading, on each phone
+
+A release that changes the app itself may need a one-off cache clear on devices
+that were already using it — see the caching entry under
+[Troubleshooting](#18-troubleshooting). Settings shows a **Build** timestamp at
+the bottom, so you can check what a device is actually running.
 
 ## 17. Uninstalling
 

@@ -6,12 +6,12 @@
 
 	# ---- Caching --------------------------------------------------------------
 	#
-	# Without these headers a browser heuristically caches index.html, which
-	# points at hash-named bundles — so it keeps loading the OLD bundle and the
-	# user never sees a new release. The app looks like it did not update, with
-	# nothing in the logs to suggest why.
+	# Without these headers a browser heuristically caches index.html, which names
+	# the hash-fingerprinted bundles — so it keeps loading the OLD bundle and the
+	# user never sees a new release. The app appears not to have updated, with
+	# nothing in any log to suggest why.
 	#
-	# Vite fingerprints every file under /assets/, so those are safe to cache
+	# Vite fingerprints everything under /assets/, so those are safe to cache
 	# forever: a new build produces new filenames.
 	@immutable path /assets/*
 	header @immutable Cache-Control "public, max-age=31536000, immutable"
@@ -20,7 +20,11 @@
 	#   index.html            - names the current bundles
 	#   /sw.js                - the service worker, which controls updates
 	#   /manifest.webmanifest - install metadata
-	#   /v1/*                 - API responses, which are never cacheable anyway
+	#   /v1/*                 - API responses, never cacheable anyway
+	#
+	# NOTE: Caddy does not reload this file on its own. After editing it, run
+	#   docker compose restart caddy   (or podman-compose restart caddy)
+	# or the running process will happily carry on with the old config.
 	@revalidate not path /assets/*
 	header @revalidate Cache-Control "no-cache"
 
