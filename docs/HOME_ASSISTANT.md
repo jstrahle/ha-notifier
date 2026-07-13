@@ -1,20 +1,115 @@
 # Home Assistant integration
 
-There are two ways to send notifications from Home Assistant. Both use a Bearer
-API key with the `notify` scope (create one in the app under Settings → API keys,
-or use the key printed by the seed step).
+You get a real `notify.home_alert` action — usable from the automation UI exactly
+like `notify.pushover` — with **no custom component**. Home Assistant's built-in
+[RESTful notification](https://www.home-assistant.io/integrations/notify.rest/)
+platform is all it takes.
 
-Store the key as a secret in `secrets.yaml`:
+## The quick way
 
-```yaml
-notify_api_key: "YOUR_API_KEY"
-```
+In the app: **Settings → Home Assistant → Generate configuration**.
+
+It mints a fresh API key and renders the complete YAML with your domain and key
+already filled in, ready to paste. That is worth doing rather than typing it by
+hand, because the token has to go into `secrets.yaml` **with the word `Bearer `
+as part of the value** — leave it out and every call fails with a 401 and no
+useful clue as to why.
+
+The rest of this page explains what that configuration does, and how to go
+further.
 
 ---
 
-## Option A — `rest_command` (simplest)
+## 1. Notifications (`notify.rest`)
 
-Add to `configuration.yaml`:
+`secrets.yaml`:
+
+```yaml
+# The "Bearer " prefix is part of the value.
+home_alert_token: "Bearer YOUR_API_KEY"
+```
+
+`configuration.yaml`:
+
+```yaml
+notify:
+  # Everyday alerts: web push only.
+  - name: home_alert
+    platform: rest
+    resource: https://notify.example.com/v1/homeassistant/notify
+    method: POST_JSON
+    headers:
+      Authorization: !secret home_alert_token
+    data:
+      priority: normal
+
+  # Critical alerts: web push AND SMS in parallel, bypassing quiet hours.
+  - name: home_alert_critical
+    platform: rest
+    resource: https://notify.example.com/v1/homeassistant/notify
+    method: POST_JSON
+    headers:
+      Authorization: !secret home_alert_token
+    data:
+      priority: critical
+```
+
+Restart Home Assistant. You now have two actions.
+
+```yaml
+automation:
+  - alias: "Water leak in the kitchen"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.kitchen_leak
+        to: "on"
+    actions:
+      - action: notify.home_alert_critical
+        data:
+          title: "Water leak in kitchen"
+          message: "The kitchen leak sensor triggered"
+          target: "security"
+```
+
+### How the fields map
+
+| Home Assistant | Here |
+|---|---|
+| `message` | the alert body |
+| `title` | the alert title (defaults to "Home Assistant") |
+| `target` | the **topic** — created automatically if it does not exist |
+| `priority` (from the notifier's `data:` block) | `low` \| `normal` \| `high` \| `critical` |
+
+### Why one notifier per priority
+
+`notify.rest`'s `data:` block is **configuration-level**, not per-call: you
+cannot pass a different priority from each automation through a single notifier.
+Defining one notifier per priority works around that, and reads better anyway —
+`notify.home_alert_critical` says plainly what it does at the call site.
+
+Add `home_alert_high` and `home_alert_low` the same way if you want them.
+
+---
+
+## 2. Deduplication for noisy sensors
+
+Pass a stable `dedup_key` and repeats inside the cooldown window are suppressed,
+counted, and then folded back into the original notification when the window
+closes (*"Repeated 6 times while muted."*). The push reuses the same tag, so it
+replaces the existing notification rather than stacking another one.
+
+`notify.rest` can only send a fixed `dedup_key` per notifier, so for a per-sensor
+key use a `rest_command` instead (below). Critical alerts are never suppressed.
+
+The window defaults to `DEDUP_COOLDOWN_SECONDS` and can be set per topic in
+Settings → Topics.
+
+---
+
+## 3. `rest_command` — when you need per-call control
+
+Use this when a single automation needs to vary the priority, the dedup key, or
+the action buttons. It is more flexible than `notify.rest` and more verbose.
 
 ```yaml
 rest_command:
@@ -22,107 +117,69 @@ rest_command:
     url: "https://notify.example.com/v1/notify"
     method: POST
     headers:
-      Authorization: !secret notify_api_key_header
+      Authorization: !secret home_alert_token
       Content-Type: "application/json"
     payload: >
       {
         "topic": "{{ topic | default('general') }}",
         "priority": "{{ priority | default('normal') }}",
         "title": "{{ title }}",
-        "body": "{{ message }}"
+        "body": "{{ message }}",
+        "dedup_key": "{{ dedup_key | default('') }}"
       }
 ```
 
-Because the header needs the `Bearer ` prefix, store it whole:
-
 ```yaml
-# secrets.yaml
-notify_api_key_header: "Bearer YOUR_API_KEY"
+actions:
+  - action: rest_command.home_notify
+    data:
+      topic: "security"
+      priority: "critical"
+      title: "Water leak in kitchen"
+      message: "The kitchen leak sensor triggered"
+      dedup_key: "leak-kitchen"
 ```
 
-Use it in an automation:
+---
+
+## 4. Action buttons (two-way)
+
+An alert can carry buttons — "Close valve", "Silence alarm" — that call back into
+Home Assistant when pressed.
+
+```bash
+curl -X POST https://notify.example.com/v1/notify \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "security",
+    "priority": "high",
+    "title": "Someone at the door",
+    "body": "Motion at the front door",
+    "actions": [
+      { "id": "unlock", "label": "Unlock",
+        "url": "https://ha.example.com/api/webhook/YOUR_SECRET_WEBHOOK_ID" }
+    ]
+  }'
+```
+
+Receive it with a webhook trigger:
 
 ```yaml
 automation:
-  - alias: "Notify on water leak"
-    trigger:
-      - platform: state
-        entity_id: binary_sensor.kitchen_leak
-        to: "on"
-    action:
-      - service: rest_command.home_notify
-        data:
-          topic: "security"
-          priority: "critical"
-          title: "Water leak in kitchen"
-          message: "The kitchen leak sensor just triggered."
+  - alias: "Unlock from an alert"
+    triggers:
+      - trigger: webhook
+        webhook_id: YOUR_SECRET_WEBHOOK_ID
+        allowed_methods: [POST]
+        local_only: false          # required: the call comes from the internet
+    actions:
+      - action: lock.unlock
+        target:
+          entity_id: lock.front_door
 ```
 
----
-
-## Option B — notify-compatible endpoint
-
-The server exposes `POST /v1/homeassistant/notify`, which accepts Home
-Assistant's native notify payload (`message`, `title`, `target`, `data`) and maps
-it to an internal notification:
-
-- `target` → topic name (first value if a list)
-- `data.priority` → priority (`low`|`normal`|`high`|`critical`)
-- `data.dedup_key` → deduplication key
-
-You can wire this to a `rest_command` and call it like a notifier:
-
-```yaml
-rest_command:
-  home_notify_ha:
-    url: "https://notify.example.com/v1/homeassistant/notify"
-    method: POST
-    headers:
-      Authorization: !secret notify_api_key_header
-      Content-Type: "application/json"
-    payload: >
-      {
-        "message": "{{ message }}",
-        "title": "{{ title | default('Home Assistant') }}",
-        "target": "{{ target | default('general') }}",
-        "data": { "priority": "{{ priority | default('normal') }}" }
-      }
-```
-
-```yaml
-action:
-  - service: rest_command.home_notify_ha
-    data:
-      title: "Front door"
-      message: "Motion detected at the front door"
-      target: "security"
-      priority: "high"
-```
-
----
-
-## Deduplication tip
-
-If a noisy sensor may fire repeatedly, pass a stable `dedup_key`. Non-critical
-duplicates within the cooldown window (default 5 minutes) are aggregated instead
-of resent. Critical messages are never suppressed.
-
----
-
-## Receiving action buttons (bidirectional)
-
-When a user presses an action button, the service POSTs to that action's `url`.
-The call is **signed**, because it can perform a real physical action — you
-should verify it rather than acting on any request that reaches the endpoint.
-
-Headers:
-
-| Header | Meaning |
-|---|---|
-| `X-Notify-Signature` | `sha256=<hex>` — HMAC-SHA256 of `${timestamp}.${rawBody}` |
-| `X-Notify-Timestamp` | Unix seconds, used to reject replays |
-
-Body:
+The payload is available as `trigger.json`:
 
 ```json
 {
@@ -133,21 +190,46 @@ Body:
   "topic": "security",
   "priority": "high",
   "title": "Someone at the door",
-  "triggered_at": "2026-07-12T09:41:00.000Z"
+  "triggered_at": "2026-07-13T09:41:00.000Z"
 }
 ```
 
-The signing key is `WEBHOOK_SIGNING_SECRET` from `.env` (falling back to
-`SESSION_SECRET` if unset).
+### Read this before wiring a button to a lock
 
-Verify it before acting. Reject anything older than a few minutes, and compare
-the HMAC in constant time:
+Home Assistant's own documentation says, plainly: **do not use a webhook to
+unlock a lock or open a garage door.** Webhook endpoints have no authentication
+beyond knowledge of the webhook ID.
+
+That warning is correct, and it is exactly why this service **signs** every action
+webhook:
+
+| Header | Meaning |
+|---|---|
+| `X-Notify-Signature` | `sha256=<hex>` — HMAC-SHA256 of `${timestamp}.${rawBody}` |
+| `X-Notify-Timestamp` | Unix seconds, so replays can be rejected |
+
+The signing key is `WEBHOOK_SIGNING_SECRET` from `.env` (falling back to
+`SESSION_SECRET`).
+
+**Home Assistant cannot verify an HMAC in YAML.** Templates have no HMAC
+function, so verifying the signature needs Python — `pyscript`, AppDaemon, or a
+custom integration. So, pragmatically:
+
+- **Non-destructive actions** (silence an alarm, acknowledge, run a scene): the
+  secrecy of the webhook ID is adequate. Use the automation above as-is.
+- **Destructive or safety-relevant actions** (locks, doors, valves): either
+  verify the signature properly, or gate the automation behind something else —
+  a `condition` on presence, a confirmation, or a second factor. A secret URL
+  alone is not enough for a front door, and this service signing the request does
+  not help if the receiving end never checks.
+
+Verification, for a receiver that can run Python:
 
 ```python
 import hashlib, hmac, time
 
 def verify(raw_body: bytes, signature: str, timestamp: str, secret: str) -> bool:
-    if abs(time.time() - int(timestamp)) > 300:      # replay window
+    if abs(time.time() - int(timestamp)) > 300:      # reject replays
         return False
     expected = "sha256=" + hmac.new(
         secret.encode(), f"{timestamp}.".encode() + raw_body, hashlib.sha256
@@ -155,36 +237,42 @@ def verify(raw_body: bytes, signature: str, timestamp: str, secret: str) -> bool
     return hmac.compare_digest(expected, signature)
 ```
 
-Sending an action button:
+A custom Home Assistant integration that verifies the signature and fires an
+ordinary HA event is on the roadmap; it would make this a non-issue.
 
-```bash
-curl -X POST https://notify.example.com/v1/notify \
-  -H "Authorization: Bearer $NOTIFY_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "topic": "security",
-    "priority": "high",
-    "title": "Someone at the door",
-    "body": "Motion at the front door",
-    "actions": [
-      { "id": "unlock", "label": "Unlock", "url": "https://ha.example.com/api/webhook/notify-unlock" }
-    ]
-  }'
+### iOS note
+
+Safari does not render notification action buttons at all. iPhone users press the
+same buttons in the app's Inbox instead, and the result — including a failed
+webhook — is reported back to them. A button that silently does nothing is worse
+than no button.
+
+---
+
+## 5. MQTT
+
+If you would rather not call an HTTP API at all, enable the MQTT bridge
+(`MQTT_ENABLED=true`) and publish to `notify/<topic>/<priority>`:
+
+```yaml
+actions:
+  - action: mqtt.publish
+    data:
+      topic: "notify/security/critical"
+      payload: >
+        { "title": "Water leak", "body": "Kitchen sensor triggered" }
 ```
 
-**iOS note:** Safari does not render notification action buttons. iPhone users
-press the button in the app's Inbox instead, which is why the Inbox shows the
-same actions. The result (including a failed webhook) is reported back to them —
-a button that silently does nothing is worse than no button.
+A plain-text payload works too; it becomes the body.
 
-## Deduplication and aggregation
+---
 
-Pass a stable `dedup_key` for noisy sensors. Repeats within the cooldown window
-are suppressed, **counted**, and then folded back into the original notification
-when the window closes ("Repeated 6 times while muted."). The push reuses the
-same `tag`, so it replaces the existing notification rather than stacking a
-second one, and the Inbox keeps one entry.
+## Troubleshooting
 
-Critical messages are never suppressed. The window defaults to
-`DEDUP_COOLDOWN_SECONDS` and can be set per topic in Settings → Deduplication
-cooldown.
+| Symptom | Cause |
+|---|---|
+| `401 Unauthorized` | The `Bearer ` prefix is missing from the secret's value, or the key was revoked. Regenerate under Settings → Home Assistant. |
+| Alert accepted (`202`) but nobody receives it | Nobody is subscribed to that topic, or their minimum priority is above the message's. Check Settings → Topic preferences. |
+| `notify.home_alert` does not appear | Home Assistant was not restarted, or the `notify:` block has a YAML error. Check **Developer tools → Actions**. |
+| Critical alert arrives but does not wake the phone | Emergency Bypass is not enabled for the sending number. See `INSTALL.md` step 12. |
+| Webhook automation never fires | `local_only: false` is missing — the call arrives from the internet, not your LAN. |

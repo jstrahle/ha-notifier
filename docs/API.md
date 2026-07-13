@@ -46,7 +46,34 @@ default `normal`), `title` (required), `body`, `dedup_key`, `actions` (max 4),
 
 ### `POST /v1/homeassistant/notify`  (Bearer, scope `notify`)
 
-Accepts Home Assistant's native notify payload. See `HOME_ASSISTANT.md`.
+Accepts Home Assistant's native notify payload, so HA's built-in **`notify.rest`**
+platform can target it directly — giving a real `notify.home_alert` action with no
+custom component.
+
+```json
+{
+  "message": "The kitchen leak sensor triggered",
+  "title": "Water leak",
+  "target": "security",
+  "priority": "critical"
+}
+```
+
+Mapping: `message` → body, `title` → title, `target` → **topic** (created if it
+does not exist; the first entry is used if HA sends a list).
+
+Extras (`priority`, `dedup_key`, `actions`, `media_url`) are accepted **either at
+the top level or nested inside `data`**, because HA sends them differently
+depending on the route:
+
+- `notify.rest` merges its config-level `data:` block into the payload at the
+  **top level**
+- `rest_command` and native notify calls **nest** them inside `data`
+
+When a field appears in both, the **nested** value wins: that is the per-call
+form, while the top-level one usually comes from static YAML.
+
+See `HOME_ASSISTANT.md` for the full configuration.
 
 ---
 

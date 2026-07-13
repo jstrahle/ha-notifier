@@ -4,6 +4,7 @@ import { AdminPanel } from '../components/AdminPanel.js';
 import { ApiKeys } from '../components/ApiKeys.js';
 import { MyProfile } from '../components/MyProfile.js';
 import { Devices } from '../components/Devices.js';
+import { HomeAssistantSetup } from '../components/HomeAssistantSetup.js';
 
 const PRIORITIES = ['low', 'normal', 'high', 'critical'];
 const CHANNELS = ['auto', 'push_only', 'sms_only'];
@@ -95,6 +96,10 @@ export function Settings({
 
       <div className="mt-8">
         <Devices />
+      </div>
+
+      <div className="mt-8">
+        <HomeAssistantSetup />
       </div>
 
       {/* Every user manages their own sender tokens — no admin needed. */}

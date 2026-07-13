@@ -123,9 +123,9 @@ and firewall commands.
 git clone <repo-url> notify-service
 cd notify-service/deploy
 
-./setup.sh                    # generates VAPID keys + secrets, writes .env
-podman-compose up -d --build  # or: docker compose up -d --build
-podman-compose exec server node dist/db/seed.js   # migrate, seed, print an API key
+./setup.sh                                        # generates VAPID keys + secrets, writes .env
+sudo docker compose up -d --build                 # or: sudo podman-compose up -d --build
+sudo docker compose exec server node dist/db/seed.js   # migrate, seed, print an API key
 ```
 
 Open `https://<your-domain>`, sign in as the admin user, then on each phone add
@@ -159,7 +159,7 @@ curl -X POST https://<your-domain>/v1/notify \
 |---|---|
 | [`INSTALL.md`](INSTALL.md) | Deployment, TLS, timezone, phone setup |
 | [`docs/API.md`](docs/API.md) | Every endpoint, with examples |
-| [`docs/HOME_ASSISTANT.md`](docs/HOME_ASSISTANT.md) | `rest_command` and notify-compatible integration; how to verify signed action webhooks |
+| [`docs/HOME_ASSISTANT.md`](docs/HOME_ASSISTANT.md) | Getting a native `notify.home_alert` action, plus `rest_command`, MQTT, and signed action webhooks |
 | [`docs/MIKROTIK_SMS.md`](docs/MIKROTIK_SMS.md) | SMS through your own router's LTE modem, over a WireGuard tunnel |
 
 ---
@@ -178,7 +178,8 @@ Deliberately honest about what is and is not built.
 | Action buttons — HMAC-signed webhook, outcome recorded and surfaced | ✅ also pressable from the Inbox, since iOS renders no notification buttons |
 | Self-service API keys with rotation | ✅ |
 | Long-lived sliding sessions, with revocation ("log out all devices") | ✅ |
-| Home Assistant, generic webhook, MQTT bridge | ✅ |
+| Home Assistant — a native `notify.home_alert` action via HA's built-in `notify.rest`, no custom component | ✅ |
+| Generic webhook, MQTT bridge | ✅ |
 | Critical alerts that break through silent mode | ⚠️ **requires SMS** — see above |
 | Rich content (camera snapshot in the notification) | ❌ `media_url` is stored but not delivered |
 | Presence-based routing (alert whoever is actually home) | ❌ not started |
