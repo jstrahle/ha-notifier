@@ -1,0 +1,25 @@
+# Secrets. deploy/.env holds the VAPID keys, session secret, database password,
+# webhook signing key and (if configured) the router or Twilio credentials — the
+# whole security posture of an installation in one file. This repository is
+# public, so it must never be committed. deploy/.env.example is the template and
+# is tracked deliberately.
+deploy/.env
+.env
+*.env
+!*.env.example
+
+# Certificates and keys, in case one is ever placed here (e.g. a router CA for
+# the MikroTik SMS provider over HTTPS).
+*.pem
+*.key
+*.crt
+
+# Dependencies and build output
+node_modules/
+dist/
+dev-dist/
+
+# Local scratch
+*.log
+logs.txt
+.DS_Store
