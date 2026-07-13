@@ -40,6 +40,9 @@ notify:
     method: POST_JSON
     headers:
       Authorization: !secret home_alert_token
+    message_param_name: message
+    title_param_name: title
+    target_param_name: target
     data:
       priority: normal
 
@@ -50,9 +53,20 @@ notify:
     method: POST_JSON
     headers:
       Authorization: !secret home_alert_token
+    message_param_name: message
+    title_param_name: title
+    target_param_name: target
     data:
       priority: critical
 ```
+
+> ### Do not omit the three `*_param_name` lines
+>
+> With `method: POST_JSON`, Home Assistant **does not send `title` or `target`
+> unless you name them here**. Leave them out and every alert arrives titled
+> *"Home Assistant"* and lands in the *general* topic — no matter what your
+> automation passes. The call still succeeds, so nothing looks broken; the fields
+> simply never leave Home Assistant.
 
 Restart Home Assistant. You now have two actions.
 
@@ -274,5 +288,7 @@ A plain-text payload works too; it becomes the body.
 | `401 Unauthorized` | The `Bearer ` prefix is missing from the secret's value, or the key was revoked. Regenerate under Settings → Home Assistant. |
 | Alert accepted (`202`) but nobody receives it | Nobody is subscribed to that topic, or their minimum priority is above the message's. Check Settings → Topic preferences. |
 | `notify.home_alert` does not appear | Home Assistant was not restarted, or the `notify:` block has a YAML error. Check **Developer tools → Actions**. |
+| **Every alert is titled "Home Assistant"** | `title_param_name: title` is missing from the notifier. With `POST_JSON`, HA does not send the title unless it is named. |
+| **Every alert lands in the `general` topic** | `target_param_name: target` is missing, for the same reason. |
 | Critical alert arrives but does not wake the phone | Emergency Bypass is not enabled for the sending number. See `INSTALL.md` step 12. |
 | Webhook automation never fires | `local_only: false` is missing — the call arrives from the internet, not your LAN. |

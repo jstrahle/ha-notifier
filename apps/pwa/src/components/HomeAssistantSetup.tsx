@@ -111,6 +111,11 @@ home_alert_token: "Bearer ${apiKey}"
 
 
 # ---- configuration.yaml ----
+#
+# The three *_param_name lines are NOT optional. With method: POST_JSON, Home
+# Assistant does not send the title or the target unless you name them here --
+# so without these, every alert arrives titled "Home Assistant" and lands in the
+# "general" topic, no matter what the automation says.
 notify:
   # Everyday alerts: web push only.
   - name: home_alert
@@ -119,6 +124,9 @@ notify:
     method: POST_JSON
     headers:
       Authorization: !secret home_alert_token
+    message_param_name: message
+    title_param_name: title
+    target_param_name: target
     data:
       priority: normal
 
@@ -130,6 +138,9 @@ notify:
     method: POST_JSON
     headers:
       Authorization: !secret home_alert_token
+    message_param_name: message
+    title_param_name: title
+    target_param_name: target
     data:
       priority: critical
 

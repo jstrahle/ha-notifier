@@ -484,45 +484,70 @@ to Mum.* Any acknowledgement, from anyone, cancels the whole chain.
 
 ## 13. Connect Home Assistant (optional)
 
-See [`docs/HOME_ASSISTANT.md`](docs/HOME_ASSISTANT.md) for the full setup. The
-short version — in `configuration.yaml`:
+**The easy way:** in the app, go to **Settings → Home Assistant → Generate
+configuration**. It creates a new API key and prints the complete YAML with your
+domain and key already filled in — copy it straight into Home Assistant.
+
+You end up with a real `notify.home_alert` action, exactly like
+`notify.pushover`, using Home Assistant's **built-in** RESTful notification
+platform. No custom component required.
+
+`secrets.yaml` — the `Bearer ` prefix is part of the value; omit it and every
+call fails with a 401 and no obvious cause:
 
 ```yaml
-rest_command:
-  home_notify:
-    url: "https://notify.example.com/v1/notify"
-    method: POST
+home_alert_token: "Bearer PASTE_YOUR_API_KEY"
+```
+
+`configuration.yaml`:
+
+```yaml
+notify:
+  - name: home_alert
+    platform: rest
+    resource: https://notify.example.com/v1/homeassistant/notify
+    method: POST_JSON
     headers:
-      Authorization: !secret notify_api_key_header
-      Content-Type: "application/json"
-    payload: >
-      {
-        "topic": "{{ topic | default('general') }}",
-        "priority": "{{ priority | default('normal') }}",
-        "title": "{{ title }}",
-        "body": "{{ message }}"
-      }
-```
-
-`secrets.yaml` (note the `Bearer ` prefix is part of the value):
-
-```yaml
-notify_api_key_header: "Bearer PASTE_YOUR_API_KEY"
-```
-
-Use it in an automation:
-
-```yaml
-action:
-  - service: rest_command.home_notify
+      Authorization: !secret home_alert_token
+    message_param_name: message
+    title_param_name: title
+    target_param_name: target
     data:
-      topic: "security"
-      priority: "critical"
+      priority: normal
+
+  - name: home_alert_critical
+    platform: rest
+    resource: https://notify.example.com/v1/homeassistant/notify
+    method: POST_JSON
+    headers:
+      Authorization: !secret home_alert_token
+    message_param_name: message
+    title_param_name: title
+    target_param_name: target
+    data:
+      priority: critical
+```
+
+> **The three `*_param_name` lines are not optional.** With `method: POST_JSON`,
+> Home Assistant does not send `title` or `target` unless they are named here.
+> Leave them out and every alert arrives titled *"Home Assistant"* and lands in
+> the *general* topic, whatever your automation passes. The call still returns
+> success, so nothing looks broken — the values simply never leave Home Assistant.
+
+Restart Home Assistant, then use it in an automation:
+
+```yaml
+actions:
+  - action: notify.home_alert_critical
+    data:
       title: "Water leak in kitchen"
       message: "The kitchen leak sensor triggered"
+      target: "security"      # the topic; created automatically if new
 ```
 
----
+For per-call control of priority, deduplication keys or action buttons, use a
+`rest_command` instead — see
+[`docs/HOME_ASSISTANT.md`](docs/HOME_ASSISTANT.md).
 
 ## 14. MQTT bridge (optional)
 
