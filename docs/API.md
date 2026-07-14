@@ -204,6 +204,12 @@ existing topic, and a newly created topic (including one auto-created by
 (`min_priority=normal`, `channel_pref=auto`, no quiet hours). Users then narrow
 this in Settings. Existing preferences are never overwritten.
 
+### `GET /v1/topics/:id/subscribers`  (admin)
+
+Who receives this topic and on what channel — `userId`, `name`, `smsNumber`,
+`channelPref`, `minPriority`, quiet hours. Used by the escalation editor to warn
+when an SMS step targets somebody whose channel already texts them immediately.
+
 ### `GET /v1/topics` (session) · `POST /v1/topics` (admin) · `PATCH /v1/topics/:id` (admin) · `DELETE /v1/topics/:id` (admin)
 
 `POST` takes `{ name, dedup_cooldown_seconds? }`. Names are restricted to
@@ -233,7 +239,18 @@ Set the caller's preferences for a topic.
 }
 ```
 
-`channel_pref` is one of `auto`, `push_only`, `sms_only`. `quiet_start`/`quiet_end`
+`channel_pref` is one of:
+
+| Value | What it means |
+|---|---|
+| `auto` | A **critical** alert is sent by push **and SMS at once**, immediately. Right when there is no escalation chain. |
+| `push_only` | No SMS up front. The user gets one only if an escalation step fires. **This is what you want with a chain** — otherwise the router texts them at t=0 and the step's delay has no effect. |
+| `sms_only` | SMS only (falls back to push if the user has no number). |
+
+Two mechanisms decide about SMS — the router's channel selection at t=0, and the
+escalation chain afterwards — and they do not know about each other. Combining
+`auto` with an SMS escalation step sends **two** texts, the first one instantly.
+The Settings UI warns about this where the mistake gets made. `quiet_start`/`quiet_end`
 are `"HH:MM"` (24-hour) and may be `null`. They are interpreted in the **server's
 local time**, set by the `TZ` environment variable (an IANA tz database name such
 as `Europe/Helsinki`). A window may wrap past midnight, e.g. `22:00` → `07:00`.

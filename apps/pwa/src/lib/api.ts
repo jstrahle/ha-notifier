@@ -84,6 +84,16 @@ export interface ManagedUser {
   smsNumber: string | null;
 }
 
+export interface TopicSubscriber {
+  userId: string;
+  name: string;
+  smsNumber: string | null;
+  channelPref: string;
+  minPriority: string;
+  quietStart: string | null;
+  quietEnd: string | null;
+}
+
 export interface Device {
   id: string;
   platform: string | null;
@@ -198,6 +208,10 @@ export const api = {
   devices: () => request<Device[]>('/v1/push/devices'),
   deleteDevice: (id: string) =>
     request<{ status: string }>(`/v1/push/devices/${id}`, { method: 'DELETE' }),
+
+  /** Who receives this topic, and on what channel. Admin only. */
+  topicSubscribers: (topicId: string) =>
+    request<TopicSubscriber[]>(`/v1/topics/${topicId}/subscribers`),
 
   // --- Topics (admin) ---
   // Note: no rename. Senders address topics by name, so renaming one would

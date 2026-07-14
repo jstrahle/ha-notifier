@@ -7,7 +7,32 @@ import { Devices } from '../components/Devices.js';
 import { HomeAssistantSetup } from '../components/HomeAssistantSetup.js';
 
 const PRIORITIES = ['low', 'normal', 'high', 'critical'];
-const CHANNELS = ['auto', 'push_only', 'sms_only'];
+/**
+ * The stored values are unchanged; only the labels are.
+ *
+ * "auto" and "push_only" were opaque, and the difference between them decides
+ * whether a critical alert texts you instantly or waits for the escalation to
+ * decide nobody is coming. People built escalation chains, left the default in
+ * place, and got the SMS immediately anyway — the chain looked broken when it was
+ * simply redundant. Names should say what they do.
+ */
+const CHANNELS: { value: string; label: string; hint: string }[] = [
+  {
+    value: 'auto',
+    label: 'Push + SMS at once (if critical)',
+    hint: 'A critical alert texts you immediately, in parallel with the push. Use this when you have no escalation chain.',
+  },
+  {
+    value: 'push_only',
+    label: 'Push first — SMS only if escalated',
+    hint: 'No SMS up front. You get one only if an escalation step decides nobody responded. Use this with a chain.',
+  },
+  {
+    value: 'sms_only',
+    label: 'SMS only',
+    hint: 'Never push. Falls back to push if you have no phone number.',
+  },
+];
 
 export function Settings({
   me,
@@ -186,19 +211,24 @@ function TopicRow(props: {
             ))}
           </select>
         </label>
-        <label className="flex flex-col">
-          <span className="text-xs text-neutral-500">Channel</span>
+        <label className="col-span-2 flex flex-col">
+          <span className="text-xs text-neutral-500">
+            Critical alerts reach me by
+          </span>
           <select
             value={channelPref}
             onChange={(e) => setChannelPref(e.target.value)}
             className="rounded border border-neutral-300 px-2 py-1"
           >
             {CHANNELS.map((c) => (
-              <option key={c} value={c}>
-                {c}
+              <option key={c.value} value={c.value}>
+                {c.label}
               </option>
             ))}
           </select>
+          <span className="mt-1 text-xs text-neutral-400">
+            {CHANNELS.find((c) => c.value === channelPref)?.hint}
+          </span>
         </label>
         <label className="flex flex-col">
           <span className="text-xs text-neutral-500">Quiet from</span>

@@ -471,4 +471,5 @@ A plain-text payload works too; it becomes the body.
 | **Every alert is titled "Home Assistant"** | `title_param_name: title` is missing from the notifier. With `POST_JSON`, HA does not send the title unless it is named. |
 | **Every alert lands in the `general` topic** | `target_param_name: target` is missing, for the same reason. |
 | Critical alert arrives but does not wake the phone | Emergency Bypass is not enabled for the sending number. See `INSTALL.md` step 12. |
+| **The SMS arrives immediately, not after the escalation delay** | The recipient's channel is *"Push + SMS at once"*, so the router texts them at t=0 — before any escalation begins. Set their channel to *"Push first — SMS only if escalated"* in Settings → Topic preferences. |
 | Webhook automation never fires | `local_only: false` is missing — the call arrives from the internet, not your LAN. |

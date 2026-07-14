@@ -4,6 +4,7 @@ import {
   type EscalationRule,
   type ManagedUser,
   type Topic,
+  type TopicSubscriber,
 } from '../lib/api.js';
 
 const PRIORITIES = ['low', 'normal', 'high', 'critical'];
@@ -603,13 +604,20 @@ function EscalationSection({
   const [topics, setTopics] = useState<Topic[]>([]);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [addingTo, setAddingTo] = useState<string | null>(null);
+  /** Per topic id: who is subscribed and on what channel. */
+  const [subs, setSubs] = useState<Record<string, TopicSubscriber[]>>({});
 
   const load = () =>
     Promise.all([api.escalationRules(), api.topics(), api.users()])
-      .then(([r, t, u]) => {
+      .then(async ([r, t, u]) => {
         setRules(r);
         setTopics(t);
         setUsers(u);
+        // We need each subscriber's channel to warn about the duplicate-SMS trap.
+        const perTopic = await Promise.all(
+          t.map(async (topic) => [topic.id, await api.topicSubscribers(topic.id)] as const),
+        );
+        setSubs(Object.fromEntries(perTopic));
       })
       .catch(onError);
 
@@ -655,6 +663,23 @@ function EscalationSection({
             .filter((r) => r.topicId === g.topicId)
             .sort((a, b) => a.stepOrder - b.stepOrder);
 
+          const topicSubs = g.topicId ? (subs[g.topicId] ?? []) : [];
+
+          /**
+           * An existing SMS step aimed at someone who already gets an SMS at
+           * t=0. The delay on the step does nothing for them, and the chain looks
+           * broken when it is merely redundant. Flag it where it is visible.
+           */
+          const redundantFor = (r: EscalationRule): TopicSubscriber[] =>
+            r.nextChannel !== 'sms'
+              ? []
+              : topicSubs.filter(
+                  (s) =>
+                    s.channelPref === 'auto' &&
+                    s.smsNumber &&
+                    (r.nextUserId === null || s.userId === r.nextUserId),
+                );
+
           return (
             <div key={g.key} className="rounded border border-neutral-200 p-2">
               <div className="flex items-center justify-between">
@@ -683,8 +708,9 @@ function EscalationSection({
                   {chain.map((r, i) => (
                     <li
                       key={r.id}
-                      className="flex items-center justify-between rounded bg-neutral-50 px-2 py-1"
+                      className="rounded bg-neutral-50 px-2 py-1"
                     >
+                     <div className="flex items-center justify-between">
                       <span className="text-xs">
                         <span className="font-semibold">{i + 1}.</span>{' '}
                         {i === 0 ? 'After' : 'Then after'}{' '}
@@ -711,6 +737,16 @@ function EscalationSection({
                       >
                         ✕
                       </button>
+                     </div>
+
+                      {redundantFor(r).length > 0 && (
+                        <p className="mt-1 text-xs text-amber-700">
+                          ⚠️ {redundantFor(r).map((s) => s.name).join(', ')}{' '}
+                          already get an SMS immediately (channel: "Push + SMS at
+                          once"), so this step sends a second one and the{' '}
+                          {r.delaySeconds}s delay changes nothing for them.
+                        </p>
+                      )}
                     </li>
                   ))}
                 </ol>
@@ -720,6 +756,7 @@ function EscalationSection({
                 <AddStepForm
                   topicId={g.topicId}
                   users={users}
+                  subscribers={g.topicId ? (subs[g.topicId] ?? []) : []}
                   onDone={async () => {
                     setAddingTo(null);
                     onStatus('Step added to the chain');
@@ -739,11 +776,13 @@ function EscalationSection({
 function AddStepForm({
   topicId,
   users,
+  subscribers,
   onDone,
   onError,
 }: {
   topicId: string | null;
   users: ManagedUser[];
+  subscribers: TopicSubscriber[];
   onDone: () => void | Promise<void>;
   onError: (e: unknown) => void;
 }) {
@@ -752,6 +791,26 @@ function AddStepForm({
   const [channel, setChannel] = useState('sms');
   const [userId, setUserId] = useState('');
   const [busy, setBusy] = useState(false);
+
+  /**
+   * The duplicate-SMS trap.
+   *
+   * A subscriber whose channel is "Push + SMS at once" already gets a text the
+   * instant a critical alert fires — from the router, before any escalation
+   * begins. An SMS step aimed at them is therefore a *second* text, not a first,
+   * and the delay you set has no effect on when they hear about it. The chain
+   * looks broken when it is merely redundant. Say so, here, at the moment the
+   * mistake is being made.
+   */
+  const redundant =
+    channel === 'sms'
+      ? subscribers.filter(
+          (s) =>
+            s.channelPref === 'auto' &&
+            s.smsNumber &&
+            (userId === '' || s.userId === userId),
+        )
+      : [];
 
   async function create() {
     setBusy(true);
@@ -830,6 +889,25 @@ function AddStepForm({
           </select>
         </label>
       </div>
+      {redundant.length > 0 && (
+        <p className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+          <strong>
+            {redundant.map((s) => s.name).join(', ')} already receive an SMS
+            immediately
+          </strong>{' '}
+          for critical alerts — their channel is{' '}
+          <em>"Push + SMS at once"</em>, so the router texts them before any
+          escalation starts. This step would send a <strong>second</strong> text,
+          and your {delay}s delay would have no effect on when they first hear
+          about it.
+          <br />
+          <br />
+          To make the delay mean something, set their channel to{' '}
+          <em>"Push first — SMS only if escalated"</em> in Settings → Topic
+          preferences.
+        </p>
+      )}
+
       {channel === 'action' && (
         <p className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
           <strong>This step lets the system act on its own.</strong> It runs the

@@ -145,6 +145,47 @@ export async function registerManagementRoutes(app: FastifyInstance): Promise<vo
     return reply.send({ status: 'deleted', name: deleted[0]!.name });
   });
 
+  /**
+   * Who actually receives alerts on this topic, and how.
+   *
+   * The escalation editor needs this to warn about a trap in the design: a user
+   * whose channel is 'auto' already gets an SMS the instant a critical alert
+   * fires, so an SMS escalation step aimed at them is a *second* SMS, not a
+   * first. Two mechanisms decide about SMS and they do not know about each
+   * other; the least this UI can do is say so.
+   */
+  app.get('/v1/topics/:id/subscribers', { preHandler: requireUser(true) }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const tenantId = req.userPrincipal!.tenantId;
+
+    const topic = (
+      await app.db
+        .select({ id: topics.id })
+        .from(topics)
+        .where(and(eq(topics.id, id), eq(topics.tenantId, tenantId)))
+        .limit(1)
+    )[0];
+    if (!topic) {
+      return reply.code(404).send({ error: { code: 'not_found', message: 'Topic not found' } });
+    }
+
+    const rows = await app.db
+      .select({
+        userId: users.id,
+        name: users.name,
+        smsNumber: users.smsNumber,
+        channelPref: subscriptions.channelPref,
+        minPriority: subscriptions.minPriority,
+        quietStart: subscriptions.quietStart,
+        quietEnd: subscriptions.quietEnd,
+      })
+      .from(subscriptions)
+      .innerJoin(users, eq(users.id, subscriptions.userId))
+      .where(eq(subscriptions.topicId, id));
+
+    return reply.send(rows);
+  });
+
   // ---- Subscriptions (self) ----
   app.put('/v1/subscriptions', { preHandler: requireUser() }, async (req, reply) => {
     const schema = z.object({
