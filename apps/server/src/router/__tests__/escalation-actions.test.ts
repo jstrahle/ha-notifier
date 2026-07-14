@@ -173,10 +173,18 @@ describe('escalation actions', () => {
     const res = await proc.run(TENANT, MSG, TOPIC, 1);
 
     const report = store.systemMessages[0]!;
-    expect(report.title).toBe('Automatic action taken');
+    expect(report.title).toBe('Automatic action triggered');
     expect(report.body).toContain('Close valve');
     expect(report.body).toContain('Water leak in kitchen');
     expect(report.priority).toBe('high');
+
+    // The wording must not overclaim. All the server knows is that the webhook
+    // returned 2xx — and Home Assistant answers a webhook on receipt, before the
+    // automation behind it has done anything. Telling someone "the valve closed"
+    // on that basis would make them stop worrying about something they should
+    // still be worrying about.
+    expect(report.body).not.toMatch(/\bran\b|\bclosed\b|\bdone\b/i);
+    expect(report.body).toMatch(/not confirmed/i);
 
     // Push to every subscriber: the household must not find the water off with
     // no explanation.

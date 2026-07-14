@@ -336,6 +336,69 @@ locks. An unattended call is a stronger reason to heed it, not a weaker one.
 5. **The report never escalates.** It cannot start a chain of its own, or
    reporting "valve closed" would close the valve again, report again, for ever.
 
+### Confirming the action actually worked
+
+The report you get — *"Close valve triggered automatically"* — means the webhook
+returned 2xx. It does **not** mean the valve moved.
+
+Home Assistant answers a webhook the moment it receives one, before the
+automation behind it has done anything. The switch may be unavailable, the
+automation may throw, the relay may be stuck. So the wording is deliberately
+"triggered", never "closed": claiming otherwise would make you stop worrying
+about something you should still be worrying about — which is the exact failure
+this whole system exists to prevent.
+
+**Close the loop from the Home Assistant side.** Have the receiving automation
+verify the device actually moved, and send its own alert back:
+
+```yaml
+- alias: "Alert action: close the water valve"
+  triggers:
+    - trigger: webhook
+      webhook_id: YOUR-SECRET-ID
+      allowed_methods: [POST]
+      local_only: true
+  actions:
+    - action: switch.turn_off
+      target:
+        entity_id: switch.water_valve
+
+    # Give the device a moment, then check it really moved. Do not trust the
+    # service call to have worked either — confirm the state.
+    - delay: "00:00:10"
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: switch.water_valve
+              state: "off"
+          sequence:
+            - action: notify.home_alert
+              data:
+                title: "Valve confirmed closed"
+                message: >
+                  The water valve is now closed
+                  ({{ 'automatically — nobody responded'
+                      if trigger.json.triggered_by == 'escalation'
+                      else 'pressed by ' ~ trigger.json.user_name }}).
+                target: "security"
+
+      default:
+        # The command was accepted and the valve is still open. This is the worst
+        # case: everyone has been told it was handled, and it was not.
+        - action: notify.home_alert_critical
+          data:
+            title: "VALVE DID NOT CLOSE"
+            message: >
+              The close command was accepted but the valve is still
+              {{ states('switch.water_valve') }}. Go and deal with it.
+            target: "security"
+```
+
+The `default:` branch is the one that matters. Everything up to that point has
+told the household the situation is handled. If it is not, that has to be said
+loudly, immediately, and to everyone.
+
 ### Telling a human press from an automatic one
 
 The webhook payload carries `triggered_by`:

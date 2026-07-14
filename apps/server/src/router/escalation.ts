@@ -150,6 +150,17 @@ export class EscalationProcessor {
    * everyone subscribed. A failure is raised as critical — a valve that did not
    * close is worse than one nobody tried to close, because now you think it is
    * handled.
+   *
+   * Note the careful wording: "triggered", never "ran". All we know is that the
+   * webhook returned 2xx, and Home Assistant answers a webhook the moment it
+   * receives one — before the automation behind it has done anything. The switch
+   * may be unavailable, the automation may throw, the valve may be stuck. Saying
+   * "the valve closed" on the strength of an HTTP status would be a lie of
+   * exactly the kind this system exists to prevent: one that makes you stop
+   * worrying about something you should still be worrying about.
+   *
+   * For a real confirmation, have the receiving automation send its own alert
+   * back once the device has actually moved.
    */
   private async reportOutcome(
     tenantId: string,
@@ -166,12 +177,12 @@ export class EscalationProcessor {
     const ok = outcomes.filter((o) => o.ok && o.ran);
 
     const title =
-      failed.length > 0 ? 'Automatic action FAILED' : 'Automatic action taken';
+      failed.length > 0 ? 'Automatic action FAILED' : 'Automatic action triggered';
 
     const parts: string[] = [];
     if (ok.length > 0) {
       parts.push(
-        `${ok.map((o) => o.label).join(', ')} ran automatically because nobody acknowledged "${alert}".`,
+        `${ok.map((o) => o.label).join(', ')} triggered automatically — nobody acknowledged "${alert}". The request was accepted, but not confirmed to have taken effect.`,
       );
     }
     if (failed.length > 0) {
