@@ -448,7 +448,7 @@ notify:
       priority: normal
     data_template:
       # Buttons come from the automation's own data: field.
-      actions: "{{ (data | default({})).get('actions', []) | to_json }}"
+      actions: "{{ (data or {}).get('actions', []) | to_json }}"
 
   - name: home_alert_critical
     platform: rest
@@ -462,7 +462,7 @@ notify:
     data:
       priority: critical
     data_template:
-      actions: "{{ (data | default({})).get('actions', []) | to_json }}"
+      actions: "{{ (data or {}).get('actions', []) | to_json }}"
 ```
 
 Now any automation can attach buttons to any alert:
@@ -494,11 +494,24 @@ Now any automation can attach buttons to any alert:
 An automation with nothing to automate simply omits `data:` and gets a plain
 alert. The notifiers stay generic; the buttons belong to the alert.
 
-> **Why the value is a string.** `notify.rest` renders `data_template:` with
-> `parse_result=False`, so `to_json` is required and the result reaches the wire
-> as a JSON *string*, not an array. The server accepts both, so this just works —
-> but it is why the template needs `| to_json` and not bare `{{ data.actions }}`,
-> which would render Python-style quotes and be rejected.
+> **Two details in that template are load-bearing.**
+>
+> **`data or {}`, not `data | default({})`.** When an automation omits `data:`
+> entirely — which every alert without buttons does — Home Assistant passes
+> `None`, not *Undefined*. Jinja's `default` filter only replaces *Undefined*, so
+> the template raises:
+>
+> ```
+> UndefinedError: 'None' has no attribute 'get'
+> ```
+>
+> The failure is neatly disguised: alerts *with* buttons work perfectly, and only
+> the plain ones break — which points the finger at the wrong notifier entirely.
+>
+> **`| to_json`.** `notify.rest` renders `data_template:` with
+> `parse_result=False`, so the value reaches the wire as a string either way. A
+> bare `{{ data.actions }}` would render Python-style single quotes and be
+> rejected; `to_json` produces real JSON, which the server parses.
 
 ### The `rest_command` alternative
 
@@ -536,3 +549,4 @@ A plain-text payload works too; it becomes the body.
 | Critical alert arrives but does not wake the phone | Emergency Bypass is not enabled for the sending number. See `INSTALL.md` step 12. |
 | **The SMS arrives immediately, not after the escalation delay** | The recipient's channel is *"Push + SMS at once"*, so the router texts them at t=0 — before any escalation begins. Set their channel to *"Push first — SMS only if escalated"* in Settings → Topic preferences. |
 | Webhook automation never fires | `local_only: false` is missing — the call arrives from the internet, not your LAN. |
+| **`UndefinedError: 'None' has no attribute 'get'`**, and only for alerts *without* buttons | The `data_template:` uses `data \| default({})`. Home Assistant passes `None` when an automation omits `data:`, and `default` only replaces *Undefined*. Use `(data or {})`. |

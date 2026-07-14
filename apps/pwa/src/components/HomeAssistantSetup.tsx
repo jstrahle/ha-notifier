@@ -131,8 +131,18 @@ notify:
       priority: normal
     data_template:
       # Lets any automation attach action buttons via its own data: field.
-      # to_json is required: notify.rest renders templates to strings.
-      actions: "{{ (data | default({})).get('actions', []) | to_json }}"
+      #
+      # Use "data or {}" -- NOT "data | default({})". When an automation omits
+      # data: (which every alert without buttons does), Home Assistant passes
+      # None, not Undefined, and Jinja's default filter only replaces Undefined.
+      # The result is:
+      #     UndefinedError: 'None' has no attribute 'get'
+      # and the notifier fails for every plain alert while working perfectly for
+      # the ones with buttons -- which points the finger at the wrong notifier.
+      #
+      # to_json is required as well: notify.rest renders templates to strings,
+      # and a bare {{ data.actions }} would produce Python-style quotes.
+      actions: "{{ (data or {}).get('actions', []) | to_json }}"
 
   # Critical alerts: web push AND SMS in parallel, bypassing quiet hours.
   # Use this one only for things that justify waking someone up.
@@ -148,7 +158,7 @@ notify:
     data:
       priority: critical
     data_template:
-      actions: "{{ (data | default({})).get('actions', []) | to_json }}"
+      actions: "{{ (data or {}).get('actions', []) | to_json }}"
 
 
 # ---- example automation ----
