@@ -36,6 +36,12 @@ and we have shipped bugs in all four. Those tests skip themselves unless
 TEST_DATABASE_URL=postgres://user@localhost:5432/db npm run test:integration
 ```
 
+## Dependencies
+
+Bump one when there is a reason to — a bug you hit, a vulnerability, a feature
+you need. Routine "it is newer" upgrades are not wanted: there is deliberately no
+Dependabot version-update config, only security updates. See SECURITY.md.
+
 ## Things this project will not take
 
 - **Dependencies with native addons.** The runtime image is deliberately

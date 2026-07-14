@@ -17,6 +17,24 @@ threat model is accordingly less about data and more about **trust and control**
 a false alert teaches people to ignore real ones, and a missed alert is the whole
 failure mode the system exists to prevent.
 
+## Dependency updates
+
+This repository does **not** chase dependency versions. There is no
+`dependabot.yml`, and no automated pull requests for routine upgrades.
+
+Instead, **Dependabot security updates** are enabled in the repository settings:
+a pull request is opened only when a dependency has a *known vulnerability*. CI
+then tests it like any other PR.
+
+The reasoning is that for an alerting system with one maintainer, a steady drip
+of version-bump PRs is noise that trains you to merge without reading — and a
+dependency you merged without reading is exactly the one that will surprise you.
+What matters is that nothing in the tree has a known hole, not that everything is
+newest.
+
+Contributors: bump a dependency in a PR when there is a reason to. "It is newer"
+is not one.
+
 ## Deployment expectations
 
 Only Caddy should be reachable from the internet, serving `/v1`, `/a` and the
