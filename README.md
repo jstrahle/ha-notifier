@@ -1,5 +1,7 @@
 # Home Notification Service
 
+[![CI](https://github.com/jstrahle/ha-notifier/actions/workflows/ci.yml/badge.svg)](https://github.com/jstrahle/ha-notifier/actions/workflows/ci.yml)
+
 A self-hosted, API-driven notification service for home automation — the piece
 that decides **who gets told what, how urgently, and what happens if nobody
 responds**.
@@ -249,15 +251,11 @@ revocation — and a type checker proves nothing about any of it.
 
 ## Contributing
 
-Issues and pull requests are welcome.
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- Run `npm run typecheck` and `npm test` in `apps/server` before opening a PR.
-- Routing behaviour belongs in `apps/server/src/router/` and should come with
-  tests against the in-memory ports — no database needed.
-- Anything that changes SQL semantics should come with an integration test in
-  `apps/server/src/db/__tests__/`.
-- Please avoid dependencies that ship native addons or deprecated transitives;
-  the runtime image is deliberately compiler-free.
+CI runs typecheck, the full test suite (including integration tests against a
+real PostgreSQL), a container image build and a Caddyfile validation on every
+pull request.
 
 ## Security
 
@@ -267,4 +265,4 @@ the router's management API — must stay unreachable from outside. The server
 refuses to start if it is configured to reach a router over a public address.
 
 If you find a vulnerability, please report it privately rather than opening a
-public issue.
+public issue — see [SECURITY.md](SECURITY.md).

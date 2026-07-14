@@ -1,0 +1,121 @@
+name: CI
+
+# Runs on every pull request, and on main after a merge. Making these checks
+# *required* in the branch protection rules is what actually stops a broken merge
+# — see CONTRIBUTING.md.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push to a PR cancels the previous run for that PR. Without this, a busy
+# branch queues up runs that are already out of date.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Server — typecheck & tests
+    runs-on: ubuntu-latest
+
+    # The integration suite runs real SQL: the inbox GROUP BY, the multi-row
+    # acknowledgement update, session revocation, and the unique index that keeps
+    # an escalation from closing a valve twice. None of that is provable without
+    # a database, so CI gets one.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: notify
+          POSTGRES_PASSWORD: notify
+          POSTGRES_DB: notify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notify"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: apps/server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/server/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc -p tsconfig.json --noEmit
+
+      # The default test run must need no infrastructure at all — that is a
+      # promise the README makes to contributors. Running it without a database
+      # first proves the integration suites really do skip themselves, rather
+      # than silently failing to run.
+      - name: Tests (no infrastructure)
+        run: npm test
+
+      - name: Tests (with a real database)
+        run: npm test
+        env:
+          TEST_DATABASE_URL: postgres://notify:notify@localhost:5432/notify
+
+  pwa:
+    name: PWA — typecheck & build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: apps/pwa
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/pwa/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # Also compiles the hand-written service worker, which nothing else covers.
+      - name: Build
+        run: npm run build
+
+  deploy-config:
+    name: Deployment config
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image is what actually runs in production, and it has broken before
+      # in ways nothing else caught: a missing lockfile, a stale COPY path.
+      - name: Build the container image
+        run: docker build -t ha-notifier:ci .
+
+      # A Caddyfile typo takes the whole site down, and Caddy does not reload it
+      # on its own — you would find out on the next restart.
+      - name: Validate the Caddyfile
+        run: |
+          docker run --rm \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -e APP_DOMAIN=example.com \
+            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+
+      - name: Check the setup script parses
+        run: bash -n deploy/setup.sh
