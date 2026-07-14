@@ -361,39 +361,85 @@ nobody did. Home Assistant may reasonably want to log the second more loudly.
 2. In Home Assistant, add `"escalate": true` to the action on the alerts where it
    is safe.
 
-Send the alert with a `rest_command` — `notify.rest` cannot carry per-call
-actions:
+### Sending an alert with buttons, from an ordinary notifier
+
+You do **not** need a `rest_command`, and you do not need a notifier per alert
+type. Keep the notifiers you already have — one per priority — and let each
+automation supply its own buttons.
+
+The trick is `data_template:`, which Home Assistant renders against the service
+call's own arguments. Add one line to each notifier:
 
 ```yaml
-- action: rest_command.home_notify_with_action
-  data:
-    topic: "security"
-    priority: "critical"
-    title: "Water leak in kitchen"
-    message: "The kitchen leak sensor triggered"
-```
-
-```yaml
-rest_command:
-  home_notify_with_action:
-    url: "https://notify.example.com/v1/notify"
-    method: POST
+notify:
+  - name: home_alert
+    platform: rest
+    resource: https://notify.example.com/v1/homeassistant/notify
+    method: POST_JSON
     headers:
       Authorization: !secret home_alert_token
-      Content-Type: "application/json"
-    payload: >
-      {
-        "topic": "{{ topic }}",
-        "priority": "{{ priority }}",
-        "title": "{{ title }}",
-        "body": "{{ message }}",
-        "actions": [
-          { "id": "shutoff", "label": "Close valve",
-            "url": "https://ha.example.com/api/webhook/YOUR-SECRET-ID",
-            "escalate": true }
-        ]
-      }
+    message_param_name: message
+    title_param_name: title
+    target_param_name: target
+    data:
+      priority: normal
+    data_template:
+      # Buttons come from the automation's own data: field.
+      actions: "{{ (data | default({})).get('actions', []) | to_json }}"
+
+  - name: home_alert_critical
+    platform: rest
+    resource: https://notify.example.com/v1/homeassistant/notify
+    method: POST_JSON
+    headers:
+      Authorization: !secret home_alert_token
+    message_param_name: message
+    title_param_name: title
+    target_param_name: target
+    data:
+      priority: critical
+    data_template:
+      actions: "{{ (data | default({})).get('actions', []) | to_json }}"
 ```
+
+Now any automation can attach buttons to any alert:
+
+```yaml
+- alias: "Water leak in the kitchen"
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.kitchen_leak
+      to: "on"
+  actions:
+    - action: notify.home_alert_critical
+      data:
+        title: "Water leak in kitchen"
+        message: "The kitchen leak sensor triggered"
+        target: "security"
+        data:
+          actions:
+            - id: shutoff
+              label: "Close valve"
+              url: "http://192.168.88.50:8123/api/webhook/YOUR-SECRET-ID"
+              escalate: true          # the escalation may run this unattended
+            - id: plumber
+              label: "Call the plumber"
+              url: "http://192.168.88.50:8123/api/webhook/ANOTHER-ID"
+                                      # no escalate: a human may press it, the system may not
+```
+
+An automation with nothing to automate simply omits `data:` and gets a plain
+alert. The notifiers stay generic; the buttons belong to the alert.
+
+> **Why the value is a string.** `notify.rest` renders `data_template:` with
+> `parse_result=False`, so `to_json` is required and the result reaches the wire
+> as a JSON *string*, not an array. The server accepts both, so this just works —
+> but it is why the template needs `| to_json` and not bare `{{ data.actions }}`,
+> which would render Python-style quotes and be rejected.
+
+### The `rest_command` alternative
+
+Only needed if you want to bypass the notify platform entirely:
 
 ---
 

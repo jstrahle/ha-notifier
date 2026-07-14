@@ -46,11 +46,48 @@ const actionSchema = z.object({
   escalate: z.boolean().optional(),
 });
 
+/**
+ * `actions` may arrive as a real array, or as a JSON string.
+ *
+ * The string form is not a quirk to tolerate — it is the only way Home Assistant
+ * can pass per-call action buttons through `notify.rest`, and it is therefore the
+ * normal case.
+ *
+ * `notify.rest` renders its `data_template:` block against the service call's
+ * arguments (rest/notify.py), which is what lets an automation supply the buttons:
+ *
+ *     data_template:
+ *       actions: "{{ data.actions | to_json }}"
+ *
+ * But it renders with `parse_result=False`, so the result is always a *string*.
+ * Refusing it would mean a notifier per alert type instead of one per priority —
+ * and worse, an alert that arrives looking perfectly normal while quietly having
+ * no buttons, so the escalation has nothing to run and the valve never closes.
+ */
+const actionsField = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (trimmed === '') return undefined; // `{{ ... | default([]) }}` on an empty call
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Leave it; the array schema rejects it with a message that names the field,
+    // rather than an opaque parse error.
+    return value;
+  }
+}, z.array(actionSchema).max(4).optional());
+
+/** An empty template render (`{{ data.dedup_key | default('') }}`) means "none". */
+const optionalString = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+  z.string().max(200).optional(),
+);
+
 /** Extras, accepted either nested under `data` or flattened at the top level. */
 const extrasSchema = z.object({
   priority: z.enum(PRIORITIES).optional(),
-  dedup_key: z.string().max(200).optional(),
-  actions: z.array(actionSchema).max(4).optional(),
+  dedup_key: optionalString,
+  actions: actionsField,
   media_url: z.string().url().optional(),
 });
 
@@ -95,16 +132,32 @@ export function normaliseHaPayload(p: HaPayload): NormalisedHaMessage {
   };
 }
 
+/**
+ * Validates and normalises a raw Home Assistant body in one step.
+ *
+ * Exported so the wire formats can be tested exactly as they arrive: the
+ * JSON-string form of `actions` is handled by the schema, not by the normaliser,
+ * so testing the normaliser alone would prove nothing about the case that
+ * actually matters.
+ */
+export function parseHaPayload(
+  body: unknown,
+): { ok: true; message: NormalisedHaMessage } | { ok: false; error: string } {
+  const parsed = haPayloadSchema.safeParse(body);
+  if (!parsed.success) return { ok: false, error: parsed.error.message };
+  return { ok: true, message: normaliseHaPayload(parsed.data) };
+}
+
 export async function registerHomeAssistantRoutes(app: FastifyInstance): Promise<void> {
   const notifyQueue = new BullQueue(QUEUE_NAMES.notify, { connection: app.ctx.redis });
 
   app.post('/v1/homeassistant/notify', { preHandler: requireApiScope('notify') }, async (req, reply) => {
-    const parsed = haPayloadSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: { code: 'bad_request', message: parsed.error.message } });
+    const parsed = parseHaPayload(req.body);
+    if (!parsed.ok) {
+      return reply.code(400).send({ error: { code: 'bad_request', message: parsed.error } });
     }
 
-    const m = normaliseHaPayload(parsed.data);
+    const m = parsed.message;
     const tenantId = req.apiPrincipal!.tenantId;
     const topicId = await resolveTopic(app, tenantId, m.topicName);
 

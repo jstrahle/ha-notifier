@@ -129,6 +129,10 @@ notify:
     target_param_name: target
     data:
       priority: normal
+    data_template:
+      # Lets any automation attach action buttons via its own data: field.
+      # to_json is required: notify.rest renders templates to strings.
+      actions: "{{ (data | default({})).get('actions', []) | to_json }}"
 
   # Critical alerts: web push AND SMS in parallel, bypassing quiet hours.
   # Use this one only for things that justify waking someone up.
@@ -143,6 +147,8 @@ notify:
     target_param_name: target
     data:
       priority: critical
+    data_template:
+      actions: "{{ (data | default({})).get('actions', []) | to_json }}"
 
 
 # ---- example automation ----
@@ -158,5 +164,16 @@ automation:
           title: "Water leak in kitchen"
           message: "The kitchen leak sensor triggered"
           target: "security"      # the topic; created automatically if new
+
+          # Optional: action buttons, supplied per alert.
+          # "escalate: true" lets the escalation run it if nobody responds —
+          # only ever on actions that reach a SAFE state (close a valve, cut
+          # power). Never one that unlocks a door.
+          data:
+            actions:
+              - id: shutoff
+                label: "Close valve"
+                url: "http://192.168.1.50:8123/api/webhook/YOUR-SECRET-ID"
+                escalate: true
 `;
 }
