@@ -5,6 +5,7 @@ import {
   MemoryStore,
   MemoryDedupStore,
   MemoryQueue,
+  MemoryActionInvoker,
   FixedClock,
 } from '../memory.js';
 import type { MessageInput, Subscriber, EscalationRule } from '../types.js';
@@ -33,6 +34,7 @@ function makeMessage(over: Partial<MessageInput> = {}): MessageInput {
     dedupKey: null,
     actions: null,
     dedupCooldownSeconds: null,
+    escalates: true,
     ...over,
   };
 }
@@ -260,7 +262,7 @@ describe('EscalationProcessor', () => {
     clock = new FixedClock(new Date(2025, 0, 1, 12, 0));
     store = new MemoryStore();
     queue = new MemoryQueue();
-    proc = new EscalationProcessor(store, queue, config, clock);
+    proc = new EscalationProcessor(store, queue, config, new MemoryActionInvoker(), clock);
     store.setSubscribers(TENANT, TOPIC, [alice, bob, carol]);
     store.setEscalationRules(twoStepRules);
     store.setEscalationRules(twoStepRules);

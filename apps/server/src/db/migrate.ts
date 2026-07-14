@@ -168,6 +168,22 @@ BEGIN
     FOREIGN KEY (next_user_id) REFERENCES users(id) ON DELETE SET NULL;
 END $$;
 
+-- Escalation actions (a step that runs the alert's own action instead of, or as
+-- well as, telling another person).
+ALTER TABLE messages      ADD COLUMN IF NOT EXISTS escalates boolean NOT NULL DEFAULT true;
+ALTER TABLE action_events ADD COLUMN IF NOT EXISTS triggered_by text NOT NULL DEFAULT 'user';
+ALTER TABLE action_events ALTER COLUMN user_id DROP NOT NULL;
+
+-- Idempotency, enforced by the database rather than by hope.
+--
+-- The escalation runs inside a queue job, and a queue job can be retried: a
+-- network blip, a worker restart, a redelivery. Without this, a retry would
+-- close the valve a second time. Enforcing "at most one escalation-triggered run
+-- per (message, action)" in the schema means no code path can get it wrong.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_escalation_action
+  ON action_events (message_id, action_id)
+  WHERE triggered_by = 'escalation';
+
 CREATE INDEX IF NOT EXISTS idx_messages_dedup ON messages (tenant_id, dedup_key, created_at);
 CREATE INDEX IF NOT EXISTS idx_deliveries_status ON deliveries (status, channel);
 CREATE INDEX IF NOT EXISTS idx_action_events_message ON action_events (message_id);

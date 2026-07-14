@@ -688,8 +688,18 @@ function EscalationSection({
                       <span className="text-xs">
                         <span className="font-semibold">{i + 1}.</span>{' '}
                         {i === 0 ? 'After' : 'Then after'}{' '}
-                        <strong>{r.delaySeconds}s</strong> → {r.nextChannel} to{' '}
-                        <strong>{userName(r.nextUserId)}</strong>
+                        <strong>{r.delaySeconds}s</strong> →{' '}
+                        {r.nextChannel === 'action' ? (
+                          <>
+                            ⚙️ <strong>run the alert's action</strong>, tell{' '}
+                            <strong>{userName(r.nextUserId)}</strong> by SMS
+                          </>
+                        ) : (
+                          <>
+                            {r.nextChannel} to{' '}
+                            <strong>{userName(r.nextUserId)}</strong>
+                          </>
+                        )}
                         <span className="ml-1 text-neutral-400">
                           ({r.minPriority}+)
                         </span>
@@ -791,18 +801,21 @@ function AddStepForm({
           />
         </label>
         <label className="flex flex-col">
-          <span className="text-xs text-neutral-500">Then send via</span>
+          <span className="text-xs text-neutral-500">Then</span>
           <select
             value={channel}
             onChange={(e) => setChannel(e.target.value)}
             className="rounded border border-neutral-300 px-2 py-1 text-sm"
           >
-            <option value="sms">sms</option>
-            <option value="webpush">webpush</option>
+            <option value="sms">send an SMS</option>
+            <option value="webpush">send a push</option>
+            <option value="action">run the alert's action ⚙️</option>
           </select>
         </label>
         <label className="flex flex-col">
-          <span className="text-xs text-neutral-500">To</span>
+          <span className="text-xs text-neutral-500">
+            {channel === 'action' ? 'Report the result to' : 'To'}
+          </span>
           <select
             value={userId}
             onChange={(e) => setUserId(e.target.value)}
@@ -817,6 +830,21 @@ function AddStepForm({
           </select>
         </label>
       </div>
+      {channel === 'action' && (
+        <p className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+          <strong>This step lets the system act on its own.</strong> It runs the
+          actions the sender marked <code>"escalate": true</code> on that
+          particular alert — closing the valve nobody came to close. It then
+          reports the outcome: an SMS to the person above, and a push to everyone.
+          <br />
+          <br />
+          Only ever mark an action escalatable if it moves things to a{' '}
+          <strong>safe</strong> state — closing a valve, cutting power. Never one
+          that unlocks a door. And note: any acknowledgement, from anyone, cancels
+          the chain before this runs.
+        </p>
+      )}
+
       <button
         onClick={create}
         disabled={busy}

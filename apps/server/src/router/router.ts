@@ -141,6 +141,12 @@ export class Router {
   private async maybeScheduleEscalation(
     message: MessageInput,
   ): Promise<boolean> {
+    // The loop guard. A message the escalation produced ("valve closed
+    // automatically") must never arm a chain of its own: it would run the action
+    // again, report again, escalate again — closing and reopening a valve for
+    // ever. Enforced here, at the single point where any chain can start.
+    if (!message.escalates) return false;
+
     const rules = await this.store.getEscalationRules(
       message.tenantId,
       message.topicId,

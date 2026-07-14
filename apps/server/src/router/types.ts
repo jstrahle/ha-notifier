@@ -1,5 +1,7 @@
 import type { Priority } from '../lib/priority.js';
 
+export type { Priority };
+
 /**
  * Domain types and "ports" (interfaces) that the router depends on.
  *
@@ -11,6 +13,15 @@ import type { Priority } from '../lib/priority.js';
  */
 
 export type Channel = 'webpush' | 'sms';
+
+/**
+ * What an escalation step does.
+ *
+ * 'action' runs the alert's own escalatable actions — closing the valve nobody
+ * came to close — and then reports the outcome, by SMS to the step's recipient
+ * and by push to everyone.
+ */
+export type EscalationChannel = Channel | 'action';
 export type ChannelPref = 'auto' | 'push_only' | 'sms_only';
 export type DeliveryStatus =
   | 'queued'
@@ -31,12 +42,31 @@ export interface MessageInput {
   actions: NotificationAction[] | null;
   /** Per-topic cooldown override; null falls back to the global default. */
   dedupCooldownSeconds: number | null;
+  /**
+   * False for messages an escalation produced. Such a message must never arm a
+   * chain of its own, or reporting "valve closed" would escalate, run the action
+   * again, report again — for ever.
+   */
+  escalates: boolean;
 }
 
 export interface NotificationAction {
   id: string;
   label: string;
   url?: string;
+  /**
+   * May an escalation run this without a human?
+   *
+   * Opt-in, per action, per alert, by the sender. The escalation rule says only
+   * "run this alert's escalatable actions" — it never names one. So the Home
+   * Assistant automation that raises a kitchen-leak alert decides that "close
+   * valve" is safe to run unattended, while "call the plumber" on the same alert
+   * is not, and a door sensor's alert offers nothing at all.
+   *
+   * Only ever set this on actions that move things to a SAFE state: closing a
+   * valve, cutting power, silencing a siren. Never on unlocking a door.
+   */
+  escalate?: boolean;
 }
 
 export interface Subscriber {
@@ -53,7 +83,12 @@ export interface EscalationRule {
   topicId: string | null; // null = applies to all topics
   minPriority: Priority;
   delaySeconds: number;
-  nextChannel: Channel | null;
+  nextChannel: EscalationChannel | null;
+  /**
+   * Who this step notifies. For an 'action' step this is who gets told, by SMS,
+   * whether the action worked — the person who will have to go and deal with it
+   * if it did not.
+   */
   nextUserId: string | null; // null = re-notify original recipients
   stepOrder: number;
 }
@@ -103,6 +138,51 @@ export interface Store {
    * aggregation window would be both noisy and expensive.
    */
   getResendableDeliveries(messageId: string): Promise<string[]>;
+
+  /** The alert's context and its escalatable actions, for an 'action' step. */
+  getMessageForEscalation(messageId: string): Promise<{
+    title: string;
+    priority: Priority;
+    topicName: string | null;
+    actions: NotificationAction[];
+  } | null>;
+
+  /**
+   * Claim the right to run this action automatically, exactly once.
+   *
+   * Returns false if it has already been claimed — a queue job can be retried,
+   * and a retry must not close the valve twice. Backed by a unique index, so the
+   * guarantee holds even against two workers racing.
+   */
+  claimEscalationAction(messageId: string, actionId: string): Promise<boolean>;
+
+  /** Record how the automatic invocation went. */
+  recordEscalationActionResult(
+    messageId: string,
+    actionId: string,
+    result: { ok: boolean; httpStatus: number | null; error: string | null },
+  ): Promise<void>;
+
+  /** A message the system raised itself. Never escalates — see MessageInput. */
+  createSystemMessage(input: {
+    tenantId: string;
+    topicId: string | null;
+    priority: Priority;
+    title: string;
+    body: string;
+  }): Promise<{ id: string }>;
+}
+
+/**
+ * Calls an action's webhook. A port, so the escalation logic can be tested
+ * without a network — the decision of *whether* to close the valve is the part
+ * that must be provably correct.
+ */
+export interface ActionInvoker {
+  invoke(
+    action: NotificationAction,
+    context: { messageId: string; title: string; priority: string; topic: string | null },
+  ): Promise<{ ok: boolean; httpStatus: number | null; error: string | null }>;
 }
 
 /** Deduplication cooldown port. Backed by Redis in production. */

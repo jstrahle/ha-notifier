@@ -6,6 +6,7 @@ import {
   time,
   integer,
   jsonb,
+  boolean,
   unique,
   index,
 } from 'drizzle-orm/pg-core';
@@ -104,6 +105,15 @@ export const messages = pgTable(
     dedupKey: text('dedup_key'),
     /** How many duplicates were suppressed and folded into this message. */
     duplicateCount: integer('duplicate_count').notNull().default(0),
+    /**
+     * Whether this message may start an escalation chain.
+     *
+     * False for the notifications an escalation itself produces ("valve closed
+     * automatically"). Without this they would be routed like any other alert,
+     * arm their own chain, run the action again, produce another notification —
+     * a loop that opens and closes a valve forever.
+     */
+    escalates: boolean('escalates').notNull().default(true),
     source: text('source'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -175,9 +185,10 @@ export const actionEvents = pgTable('action_events', {
     .notNull()
     .references(() => messages.id, { onDelete: 'cascade' }),
   actionId: text('action_id').notNull(),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
+  /** NULL when the escalation ran the action rather than a person. */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  /** 'user' | 'escalation' — the receiving system may want to treat them differently. */
+  triggeredBy: text('triggered_by').notNull().default('user'),
   status: text('status').notNull().default('pending'), // pending|ok|failed|no_url
   httpStatus: integer('http_status'),
   error: text('error'),

@@ -12,6 +12,12 @@ const actionSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   url: z.string().url().optional(),
+  /**
+   * May an escalation run this without a human? Opt-in, per action, per alert.
+   * Only ever set it on actions that move things to a SAFE state — closing a
+   * valve, cutting power. Never on unlocking a door.
+   */
+  escalate: z.boolean().optional(),
 });
 
 const notifySchema = z.object({

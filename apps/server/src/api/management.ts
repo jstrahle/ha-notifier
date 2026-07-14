@@ -483,7 +483,7 @@ export async function registerManagementRoutes(app: FastifyInstance): Promise<vo
       topic_id: z.string().uuid().nullable().optional(),
       min_priority: z.enum(PRIORITIES).default('critical'),
       delay_seconds: z.number().int().min(10).default(180),
-      next_channel: z.enum(['webpush', 'sms']).nullable().optional(),
+      next_channel: z.enum(['webpush', 'sms', 'action']).nullable().optional(),
       next_user_id: z.string().uuid().nullable().optional(),
       // Optional: if omitted, the step is appended to the end of that topic's
       // chain. Making a person pick a step number by hand is implementation
@@ -591,7 +591,7 @@ export async function registerManagementRoutes(app: FastifyInstance): Promise<vo
     const schema = z.object({
       min_priority: z.enum(PRIORITIES).optional(),
       delay_seconds: z.number().int().min(10).optional(),
-      next_channel: z.enum(['webpush', 'sms']).nullable().optional(),
+      next_channel: z.enum(['webpush', 'sms', 'action']).nullable().optional(),
       next_user_id: z.string().uuid().nullable().optional(),
       step_order: z.number().int().min(1).optional(),
     });

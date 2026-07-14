@@ -44,6 +44,10 @@ Fields: `topic` (default `general`), `priority` (`low`|`normal`|`high`|`critical
 default `normal`), `title` (required), `body`, `dedup_key`, `actions` (max 4),
 `media_url`. Response: `{ "message_id": "...", "status": "accepted" }`.
 
+An action may carry **`"escalate": true`**, which permits an escalation step to
+run it without a human — for the valve nobody came to close. Set it only on
+actions that reach a *safe* state. See `HOME_ASSISTANT.md`.
+
 ### `POST /v1/homeassistant/notify`  (Bearer, scope `notify`)
 
 Accepts Home Assistant's native notify payload, so HA's built-in **`notify.rest`**
@@ -309,6 +313,16 @@ tenant, including the ownerless one created by the seed.
 - `GET /v1/escalation-rules`
 - `POST /v1/escalation-rules` — `step_order` is **optional**; omit it and the
   step is appended to the end of that topic's chain.
+
+  `next_channel` may be `webpush`, `sms`, or **`action`**. An `action` step runs
+  the alert's own actions — the ones the sender marked `"escalate": true` — and
+  then reports the outcome: an SMS to `next_user_id`, and a push to everyone
+  subscribed. See `HOME_ASSISTANT.md` for the safety rules; in short, only
+  automate actions that reach a *safe* state, never one that unlocks a door.
+
+  The action runs at most once (enforced by a unique index, so a retried job
+  cannot repeat it), never runs if anyone acknowledged, and the report it
+  produces can never start an escalation of its own.
 - `PATCH /v1/escalation-rules/:id` — edit a step in place
 - `DELETE /v1/escalation-rules/:id`
 

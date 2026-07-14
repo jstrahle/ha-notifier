@@ -1,9 +1,12 @@
 import { summarize } from './aggregation.js';
 import type {
+  ActionInvoker,
   Channel,
   Clock,
   DedupStore,
   EscalationRule,
+  NotificationAction,
+  Priority,
   Queue,
   Store,
   Subscriber,
@@ -30,6 +33,11 @@ interface MessageRow {
   body: string;
   duplicateCount: number;
   createdAt: number;
+  title: string;
+  priority: Priority;
+  topicName: string | null;
+  actions: NotificationAction[];
+  escalates: boolean;
 }
 
 export class MemoryStore implements Store {
@@ -41,14 +49,32 @@ export class MemoryStore implements Store {
   duplicateCounts = new Map<string, number>();
   private seq = 0;
 
+  /** Actions this store was asked to claim, in order. */
+  claimedActions: string[] = [];
+  /** Messages the system raised itself (e.g. "valve closed"). */
+  systemMessages: MessageRow[] = [];
+
   /** Test helper: register a message so aggregation has something to fold into. */
   addMessage(
     id: string,
     dedupKey: string | null,
     body = 'Body',
     createdAt = Date.now(),
+    extra: Partial<MessageRow> = {},
   ): void {
-    this.messages.push({ id, dedupKey, body, duplicateCount: 0, createdAt });
+    this.messages.push({
+      id,
+      dedupKey,
+      body,
+      duplicateCount: 0,
+      createdAt,
+      title: 'Alert',
+      priority: 'critical',
+      topicName: 'security',
+      actions: [],
+      escalates: true,
+      ...extra,
+    });
   }
 
   getMessage(id: string): MessageRow | undefined {
@@ -155,6 +181,53 @@ export class MemoryStore implements Store {
       .map((d) => d.id);
   }
 
+  async getMessageForEscalation(messageId: string) {
+    const m = this.messages.find((x) => x.id === messageId);
+    if (!m) return null;
+    return {
+      title: m.title,
+      priority: m.priority,
+      topicName: m.topicName,
+      actions: m.actions,
+    };
+  }
+
+  async claimEscalationAction(messageId: string, actionId: string): Promise<boolean> {
+    const key = `${messageId}::${actionId}`;
+    if (this.claimedActions.includes(key)) return false; // already run
+    this.claimedActions.push(key);
+    return true;
+  }
+
+  async recordEscalationActionResult(): Promise<void> {
+    /* results are asserted through the invoker in tests */
+  }
+
+  async createSystemMessage(input: {
+    tenantId: string;
+    topicId: string | null;
+    priority: Priority;
+    title: string;
+    body: string;
+  }): Promise<{ id: string }> {
+    const id = `sys${this.systemMessages.length + 1}`;
+    const row: MessageRow = {
+      id,
+      dedupKey: null,
+      body: input.body,
+      duplicateCount: 0,
+      createdAt: Date.now(),
+      title: input.title,
+      priority: input.priority,
+      topicName: null,
+      actions: [],
+      escalates: false, // the loop guard
+    };
+    this.systemMessages.push(row);
+    this.messages.push(row);
+    return { id };
+  }
+
   private latestForDedupKey(dedupKey: string): MessageRow | undefined {
     return this.messages
       .filter((m) => m.dedupKey === dedupKey)
@@ -221,6 +294,21 @@ export class MemoryQueue implements Queue {
     delaySeconds: number,
   ): Promise<void> {
     this.scheduledAggregations.push({ ...payload, delaySeconds });
+  }
+}
+
+/** Records invocations instead of making network calls. */
+export class MemoryActionInvoker implements ActionInvoker {
+  invoked: { actionId: string; url: string | undefined }[] = [];
+  /** Set to make the next invocations fail, as a real webhook would. */
+  failWith: string | null = null;
+
+  async invoke(action: NotificationAction) {
+    this.invoked.push({ actionId: action.id, url: action.url });
+    if (this.failWith) {
+      return { ok: false, httpStatus: 500, error: this.failWith };
+    }
+    return { ok: true, httpStatus: 200, error: null };
   }
 }
 

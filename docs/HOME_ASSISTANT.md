@@ -263,6 +263,140 @@ than no button.
 
 ---
 
+## 4b. Escalating to an action — closing the valve nobody came to close
+
+An escalation step does not have to be another person. It can be **the alert's
+own action**, run automatically because nobody responded.
+
+```
+🔒 security — critical
+   1. immediately   → push to everyone
+   2. +3 min        → SMS to Jari
+   3. +5 min        → SMS to Liisa
+   4. +10 min       → ⚙️ run the alert's action, SMS the result to Jari
+   5. +15 min       → SMS to the neighbour
+```
+
+### The sender decides what is safe to automate
+
+Escalation rules are per topic; a valve is per alert. That tension resolves
+itself, because the alert already carries its own actions. Mark the ones that may
+run unattended:
+
+```json
+"actions": [
+  { "id": "shutoff", "label": "Close valve",
+    "url": "https://ha.example.com/api/webhook/SECRET", "escalate": true },
+  { "id": "plumber", "label": "Call the plumber",
+    "url": "https://ha.example.com/api/webhook/OTHER" }
+]
+```
+
+The escalation rule never names an action. It says only *"run this alert's
+escalatable actions"*. So the automation that raises a kitchen-leak alert decides
+that closing the valve is safe to do unattended, while calling the plumber is
+not — and a door sensor's alert, in the same topic, offers nothing to run at all.
+
+Two opt-ins are required, and both are yours: the rule must ask for an action
+step, **and** the sender must have marked that action on that alert.
+
+### ⚠️ Only ever automate actions that reach a SAFE state
+
+| Reasonable | Never |
+|---|---|
+| Close a water valve | Unlock a door |
+| Cut power to an appliance | Open a garage |
+| Silence a siren | Disarm an alarm |
+| Turn off a heater | Turn off heating in winter |
+
+Nothing in the software can enforce this. The system is deciding to act because
+**nobody answered their phone** — which is not evidence that acting is safe, only
+that nobody stopped it. Choose actions whose worst outcome is inconvenience.
+
+Home Assistant's own documentation already warns against wiring webhooks to
+locks. An unattended call is a stronger reason to heed it, not a weaker one.
+
+### What happens when it runs
+
+1. **Acknowledgement cancels it.** If anyone acknowledged the alert — from the
+   notification, the SMS link or the Inbox — the chain stops and the action never
+   runs. A human dealt with it; the valve is theirs to close.
+2. **It runs at most once.** The claim is enforced by a unique index in the
+   database, so a retried queue job or two workers racing cannot close the valve
+   twice.
+3. **Everyone is told.** A push goes to every subscriber, and an SMS to the person
+   named on the step. This is not optional: someone who comes home to find the
+   water off, with no explanation, stops trusting the system — and trust is the
+   only reason anyone gets up at 3am for it.
+4. **A failure is louder than a success.** If the webhook fails, the report goes
+   out as **critical**: *"Close valve FAILED (Receiver returned 500). Nobody
+   acknowledged 'Water leak in kitchen'. Deal with it yourself."* A valve that did
+   not close is worse than one nobody tried to close, because now you think it is
+   handled.
+5. **The report never escalates.** It cannot start a chain of its own, or
+   reporting "valve closed" would close the valve again, report again, for ever.
+
+### Telling a human press from an automatic one
+
+The webhook payload carries `triggered_by`:
+
+```json
+{
+  "action_id": "shutoff",
+  "triggered_by": "escalation",
+  "user_id": null,
+  "user_name": null,
+  "title": "Water leak in kitchen",
+  "triggered_at": "2026-07-14T03:12:00.000Z"
+}
+```
+
+`triggered_by: "user"` means somebody pressed the button. `"escalation"` means
+nobody did. Home Assistant may reasonably want to log the second more loudly.
+
+### Setting it up
+
+1. In the app: **Settings → Escalation chains → the topic → + Add step**, and
+   choose **run the alert's action**. Pick who is told the outcome by SMS.
+2. In Home Assistant, add `"escalate": true` to the action on the alerts where it
+   is safe.
+
+Send the alert with a `rest_command` — `notify.rest` cannot carry per-call
+actions:
+
+```yaml
+- action: rest_command.home_notify_with_action
+  data:
+    topic: "security"
+    priority: "critical"
+    title: "Water leak in kitchen"
+    message: "The kitchen leak sensor triggered"
+```
+
+```yaml
+rest_command:
+  home_notify_with_action:
+    url: "https://notify.example.com/v1/notify"
+    method: POST
+    headers:
+      Authorization: !secret home_alert_token
+      Content-Type: "application/json"
+    payload: >
+      {
+        "topic": "{{ topic }}",
+        "priority": "{{ priority }}",
+        "title": "{{ title }}",
+        "body": "{{ message }}",
+        "actions": [
+          { "id": "shutoff", "label": "Close valve",
+            "url": "https://ha.example.com/api/webhook/YOUR-SECRET-ID",
+            "escalate": true }
+        ]
+      }
+```
+
+---
+
 ## 5. MQTT
 
 If you would rather not call an HTTP API at all, enable the MQTT bridge

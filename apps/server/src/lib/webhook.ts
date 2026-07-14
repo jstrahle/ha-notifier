@@ -18,12 +18,21 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 export interface ActionWebhookPayload {
   message_id: string;
   action_id: string;
-  user_id: string;
-  user_name: string;
+  /** Null when an escalation ran the action rather than a person. */
+  user_id: string | null;
+  user_name: string | null;
   topic: string | null;
   priority: string;
   title: string;
   triggered_at: string;
+  /**
+   * 'user' — somebody pressed the button.
+   * 'escalation' — nobody did, and the system ran it on their behalf.
+   *
+   * The receiver may well want to treat these differently: an unattended valve
+   * closure is worth logging louder than a deliberate one.
+   */
+  triggered_by: 'user' | 'escalation';
 }
 
 export const SIGNATURE_HEADER = 'x-notify-signature';

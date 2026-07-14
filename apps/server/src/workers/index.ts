@@ -42,6 +42,7 @@ export function startNotifyWorker(ctx: AppContext, connection: Redis): Worker {
         dedupKey: msg.dedupKey,
         actions: (msg.actions as NotificationAction[] | null) ?? null,
         dedupCooldownSeconds,
+        escalates: msg.escalates,
       };
       await ctx.router.route(input);
     },

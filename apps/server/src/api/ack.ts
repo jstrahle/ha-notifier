@@ -128,6 +128,7 @@ export async function registerAckRoutes(app: FastifyInstance): Promise<void> {
             messageId,
             actionId,
             userId: principal.userId,
+            triggeredBy: 'user',
             status: 'pending',
           })
           .returning({ id: actionEvents.id })
@@ -162,6 +163,7 @@ export async function registerAckRoutes(app: FastifyInstance): Promise<void> {
           priority: msg.priority,
           title: msg.title,
           triggered_at: new Date().toISOString(),
+          triggered_by: 'user',
         },
       );
 

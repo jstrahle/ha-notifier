@@ -9,6 +9,7 @@ import { BullMqQueue } from './router/queue.js';
 import { Router } from './router/router.js';
 import { EscalationProcessor } from './router/escalation.js';
 import { AggregationProcessor } from './router/aggregation.js';
+import { WebhookActionInvoker } from './channels/action-invoker.js';
 
 /**
  * Central composition root. Builds the concrete adapters and injects them into
@@ -48,7 +49,12 @@ export function createContext(config: AppConfig): AppContext {
     smsEnabled: sms.enabled,
   };
   const router = new Router(store, dedup, queue, routerConfig);
-  const escalation = new EscalationProcessor(store, queue, routerConfig);
+  const escalation = new EscalationProcessor(
+    store,
+    queue,
+    routerConfig,
+    new WebhookActionInvoker(config),
+  );
   const aggregation = new AggregationProcessor(store, queue);
 
   return {
